@@ -62,16 +62,16 @@ from .rss import RSSItem
 
 
 @register(
-    "astrbot_plugin_rss",
-    "Soulter / Koko",
+    "astrbot_plugin_rss_for_koko",
+    "Soulter / coco",
     "面向 LLM 的 RSS 订阅插件",
     "1.2.0",
-    "https://github.com/Soulter/astrbot_plugin_rss",
+    "https://github.com/coco292931/astrbot_plugin_rss",
 )
 class RssPlugin(Star):
     """RSS 订阅插件：以 LLM 为主、用户为辅处理订阅更新。"""
 
-    USER_AGENT = "AstrBot-RSS-LLM/1.2 (+https://github.com/Soulter/astrbot_plugin_rss)"
+    USER_AGENT = "AstrBot-RSS-LLM/1.2 (+https://github.com/coco292931/astrbot_plugin_rss)"
 
     def __init__(self, context: Context, config: AstrBotConfig) -> None:
         super().__init__(context)
