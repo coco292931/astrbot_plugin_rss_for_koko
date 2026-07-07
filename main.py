@@ -602,8 +602,11 @@ class RssPlugin(Star):
             )
         return items
 
+    # 时间戳合理性上限：当前年份 + 10 年，防止异常未来年份污染 last_update
+    _MAX_REASONABLE_TIMESTAMP = 32503680000  # 约 3000 年 1 月 1 日
+
     def _parse_datetime_to_timestamp(self, value: str) -> int:
-        """兼容多种 RSS/Atom 日期格式。"""
+        """兼容多种 RSS/Atom 日期格式。年份异常（>3000年）时返回 0，退化为 seen_ids 去重。"""
         if not value:
             return 0
         try:
@@ -615,7 +618,11 @@ class RssPlugin(Star):
                 return 0
         if not dt.tzinfo:
             dt = dt.replace(tzinfo=timezone.utc)
-        return int(dt.timestamp())
+        ts = int(dt.timestamp())
+        if ts > self._MAX_REASONABLE_TIMESTAMP:
+            self.logger.warning(f"rss: 忽略异常未来时间戳 {ts}（原始值: {value!r}），将使用 seen_ids 去重")
+            return 0
+        return ts
 
     def _content_hash(self, *parts: str) -> str:
         """为缺少 guid/link 的条目生成内容哈希。"""
@@ -1046,7 +1053,12 @@ class RssPlugin(Star):
         sub_info = feed_data.get("subscribers", {}).get(user)
         if not isinstance(sub_info, dict):
             return
-        max_ts = max([int(sub_info.get("last_update", 0) or 0), *[item.pubDate_timestamp for item in items]])
+        # 只取合理范围内的时间戳，避免异常未来年份污染 last_update
+        valid_timestamps = [
+            ts for ts in [item.pubDate_timestamp for item in items]
+            if 0 < ts <= self._MAX_REASONABLE_TIMESTAMP
+        ]
+        max_ts = max([int(sub_info.get("last_update", 0) or 0), *valid_timestamps]) if valid_timestamps else int(sub_info.get("last_update", 0) or 0)
         sub_info["last_update"] = max_ts
         sub_info["latest_link"] = items[0].link if items else sub_info.get("latest_link", "")
         seen = list(sub_info.get("seen_ids", []))
