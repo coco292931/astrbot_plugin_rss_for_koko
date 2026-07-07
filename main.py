@@ -90,6 +90,7 @@ class RssPlugin(Star):
         self.data_handler = DataHandler(
             os.path.join(self.data_dir, "astrbot_plugin_rss_data.json")
         )
+        self._last_poll_errors: dict[str, str] = {}
 
         self.title_max_length = self._cfg_int("title_max_length", 80)
         self.description_max_length = self._cfg_int("description_max_length", 800)
@@ -376,6 +377,8 @@ class RssPlugin(Star):
         only_new: bool = True,
     ) -> list[RSSItem]:
         """从站点拉取并标准化 RSS/Atom/JSON Feed。"""
+        if not hasattr(self, "_last_poll_errors"):
+            self._last_poll_errors = {}
         self._last_poll_errors.pop(url, None)
         text = await self.parse_channel_info(url)
         if text is None:
