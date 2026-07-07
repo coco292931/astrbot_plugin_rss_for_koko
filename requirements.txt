@@ -1,2 +1,6 @@
+aiohttp
+apscheduler
+beautifulsoup4
+lxml
 python-dateutil
 pillow

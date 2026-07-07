@@ -1,165 +1,386 @@
 # astrbot-plugin-rss
 
-✨ Get Everything You Want to Know / 获取你想知道的一切。✨
+面向 LLM 的 RSS / Atom / JSON Feed 订阅插件。
 
-支持通过 RSSHub 路由和直接 URL 订阅 RSS 源，并定时获取最新的 RSS 内容。
+本插件从原来的“RSS 拉取后直接发给用户”，改为“RSS 拉取后先交给 LLM，由 LLM 结合人格、会话上下文和 RSS 内容生成最终回复，再发送给订阅会话”。用户命令仍保留为辅助入口，核心能力面向 LLM tool 调用。
 
-<img width=300 src="https://github.com/user-attachments/assets/16886f57-886c-4aad-abd1-2edd5d1f2c06">
+## 主要能力
 
-## 功能
+- **LLM-first 推送**：订阅源有更新时，插件将结构化 RSS 内容交给 LLM，最终由 LLM 决定如何向用户说明。
+- **Tool 调用**：LLM 可直接添加、删除、列出订阅，也可拉取单个 Feed 或当前会话全部订阅。
+- **间隔拉取**：使用 `interval_minutes` 按固定分钟间隔自动拉取，不再要求手动填写 cron 表达式。
+- **历史去重**：每个订阅会话维护 `seen_ids`，避免重复把同一条 RSS 内容投喂给 LLM。
+- **格式扩展**：支持 RSS / RDF / Atom XML，以及 JSON Feed。
+- **代理支持**：支持全局 `proxy_url`，代理失败后可回退直连。
+- **上下文安全**：音频、视频等多媒体不会直接附加到 LLM 上下文，只以 `[音频]`、`[视频]` 或链接占位。
+- **轻量发送链路**：保留简化发送逻辑，优先平台会话发送，失败时回退 AstrBot 核心发送。
 
-- 添加、列出和删除 RSSHub endpoint
-- 通过 RSSHub 路由订阅 RSS 源
-- 直接通过 URL 订阅 RSS 源
-- 列出所有订阅
-- 删除订阅
-- 获取最新一条订阅内容
+## 工作流
 
-## 指令描述
+```text
+RSS/Atom/JSON Feed
+  -> 拉取与解析
+  -> 标准化 RSSItem
+  -> 历史去重 seen_ids
+  -> 构造 LLM prompt
+  -> 调用当前会话 LLM Provider
+  -> 发送 LLM 最终回复
+  -> 写入 AstrBot 对话历史
+```
 
-### RSSHub 相关指令
-
-- `/rss rsshub add <url>`: 添加一个 RSSHub endpoint
-- `/rss rsshub list`: 列出所有 RSSHub endpoint
-- `/rss rsshub remove <idx>`: 删除一个 RSSHub endpoint
-
-### 订阅相关指令
-
-- `/rss add <idx> <route> <cron_expr>`: 通过 RSSHub 路由给当前会话的增加一条订阅
-- `/rss add-url <url> <cron_expr>`: 给当前会话直接增加一条自定义的订阅
-- `/rss list`: 列出当前会话的所有订阅
-- `/rss remove <idx>`: 删除当前会话指定序号的订阅
-- `/rss get <idx>`: 获取当前会话的指定序号中最新一条的订阅内容
-
-## Cron 表达式教程
-
-Cron 表达式格式：`* * * * *`，分别表示分钟、小时、日、月、星期，`*` 表示任意值，支持范围和逗号分隔。例：
-
-1. `0 0 * * *` 表示每天 0 点触发。
-2. `0/5 * * * *` 表示每 5 分钟触发。
-3. `0 9-18 * * *` 表示每天 9 点到 18 点触发。
-4. `0 0 1,15 * *` 表示每月 1 号和 15 号 0 点触发。
-
-星期的取值范围是 0-6，0 表示星期天。
+如果 LLM 调用失败，并且启用了 `send_user_fallback_on_llm_error`，插件会回退为直接发送 RSS 文本摘要，避免完全漏推。
 
 ## 安装
 
-参考 AstrBot 安装插件方式。
+参考 AstrBot 插件安装方式。
 
-## 使用
+依赖见 `requirements.txt`：
 
-### 从 RSSHub 订阅内容
+```text
+aiohttp
+apscheduler
+beautifulsoup4
+lxml
+python-dateutil
+pillow
+```
 
-首先使用指令 `/rss rsshub add https://rsshub.app` 添加官方 RSSHub 订阅站。
+## 用户辅助命令
 
-然后使用指令 `/rss rsshub list` 查看刚刚添加的订阅站。
+这些命令保留给用户手动管理订阅。推荐主要通过 LLM tool 使用插件。
 
-官方维护了很多可用的路由，涵盖了 Telegram Channel、Bilibili、金融信息、高校官网信息等等。可参考 RSSHub 官方维护的路由：https://docs.rsshub.app/zh/routes/popular
+### 添加订阅
 
-找到自己想订阅的内容，根据其中的 Route、Example、Parameters 组装成最终的路由，如 `/cls/telegraph`（只需要路由名即可，不要加前面的 `https://rsshub.app` ）
+```text
+/rss add-url <feed_url> [interval_minutes]
+```
 
-然后使用指令 `/rss add 0 /cls/telegraph 0 * * * *` 订阅消息，每小时拉取一次。第一个 0 表示使用的是 list 中第 0 个 RSSHub 站。
+示例：
 
-> 鼓励自己搭建 RSSHub 订阅站。
+```text
+/rss add-url https://example.com/feed.xml 30
+```
 
+含义：当前会话订阅该 Feed，每 30 分钟自动拉取一次。
 
-### 从自定义链接订阅内容
+### 列出订阅
 
-你可以使用指令 `/rss add-url <url> <cron_expr>` 订阅。
+```text
+/rss list
+```
 
-如 `/rss add-url https://blog.lwl.lol/index.xml 0 * * * *`。
+输出当前会话订阅的 Feed 列表、索引和拉取间隔。
 
-请注意目前仅支持 RSS 2.0 格式。
+### 删除订阅
 
-## 配置
+```text
+/rss remove <idx>
+```
 
-~~插件成功启动后，配置文件位于 `data/astrbot_plugin_rss_data.json`。~~
+`idx` 来自 `/rss list`。
 
-原配置文件，现已根据文档更新，请在Astrbot的插件管理中进行设置。
+### 手动获取内容
 
-### 基础配置
+```text
+/rss get <idx> [latest|new] [limit]
+```
 
-`title_max_length`
+- `latest`：获取最新内容，不强制只看新增。
+- `new`：只获取相对当前会话订阅状态的新增内容。
+- `limit`：最多返回条数。
 
-- **描述:** 推送消息的标题最大长度。
-- **类型:** 整数 (`int`)
-- **默认值:** `30`
+示例：
 
-`description_max_length`
+```text
+/rss get 0 latest 3
+/rss get 0 new 5
+```
 
-- **描述:** 推送消息的描述内容最大长度。
-- **类型:** 整数 (`int`)
-- **默认值:** `500`
+## LLM Tools
 
-`t2i` (Text to Image)
+### `rss_subscribe_feed`
 
-- **描述:** 是否将文字内容转换为图片进行发送。
-- **类型:** 布尔值 (`bool`)
-- **提示：**订阅中的图片内容会丢失
-- **默认值:** `false`
+订阅一个 RSS / Atom / JSON Feed。
 
-`max_items_per_poll`
+参数：
 
-- **描述:** 每次从数据源获取的最大条目数。
-- **类型:** 整数 (`int`)
-- **提示:** 设置为 `-1` 表示不限制获取的条目数。
-- **默认值:** `3`
+- `feed_url`：完整 Feed URL，必须是 `http://` 或 `https://`。
+- `interval_minutes`：自动拉取间隔分钟数；为空或 0 时使用全局默认值。
 
-`is_hide_url`
+返回：
 
-- **描述:** 是否在推送的消息中隐藏原始链接。
-- **类型:** 布尔值 (`bool`)
-- **提示:** 如果设置为 `true`，推送的消息中将不会显示链接，这有助于解决因发送链接可能导致的风控问题。
-- **默认值:** `false`
+```json
+{
+  "status": "success",
+  "message": "订阅已添加",
+  "data": {
+    "title": "...",
+    "description": "...",
+    "interval_minutes": 60
+  }
+}
+```
 
-`compose`
+说明：通过该工具创建的订阅会记录 `subscriber_kind=llm`，自动触发 LLM 时会在提示词中告诉模型“这是由 LLM 工具订阅的 RSS”。
 
-- **描述:** （仅限qq）是否将消息合并，以转发的方式组合发送。
-- **类型:** 布尔值 (`bool`)
-- **提示:** 如果设置为 `true`，会以转发的方式组合发送（建议开启，以规避qq的消息频率检测）。
-- **默认值:** `true`
+### `rss_list_subscriptions`
 
+列出当前会话的订阅。
 
+返回字段包括：
 
-### 图片配置 
+- `index`
+- `url`
+- `title`
+- `description`
+- `interval_minutes`
+- `last_update`
 
-本部分包含与图片处理相关的配置。
+### `rss_remove_subscription`
 
-`pic_config.is_read_pic`
+删除当前会话的订阅。
 
-- **描述:** 是否自动读取 RSS 链接中的图片。
-- **类型:** 布尔值 (`bool`)
-- **提示:** 如果设置为 `true`，程序会自动尝试获取 RSS 链接中的图片。
-- **默认值:** `false`
+参数二选一：
 
-`pic_config.is_adjust_pic`
+- `index`：来自 `rss_list_subscriptions`。
+- `feed_url`：完整 Feed URL。
 
-- **描述:** 是否对读取到的图片进行防和谐处理。
-- **类型:** 布尔值 (`bool`)
-- **提示:** 如果设置为 `true`，程序会在读取到的图片四个角的像素点上添加随机像素，以尝试规避和谐。
-- **默认值:** `false`
+参数不足或索引无效时会拒绝删除。
 
-`pic_config.max_pic_item`
+### `rss_fetch_items`
 
-- **描述:** 每次处理图片的最大条目数。
-- **类型:** 整数 (`int`)
-- **提示:** 设置为 `-1` 表示不限制每次转换的图片条目数。
-- **默认值:** `3`
+拉取单个 Feed 的结构化条目，直接返回给 LLM，不在工具内部总结。
 
+参数：
 
+- `feed_url`：直接拉取指定 Feed。
+- `index`：拉取当前会话订阅列表中的某个 Feed。
+- `limit`：最多返回条数。
+- `only_new`：是否只返回新增条目。
+- `include_full_content`：是否尽量返回正文内容。
+- `mark_as_seen`：是否把本次返回内容标记为已读。
 
-## Q&A
+### `rss_poll_subscriptions`
 
-Q： #13 bot会重复发送同一条消息多次，次数会不停增加。
+拉取当前会话所有订阅源。
 
-A： 更新rss配置时，由于AsyncIOScheduler没正常删除旧任务导致的，重启Astrbot可以解决，在接下来版本中计划修复该问题。
+参数：
 
+- `only_new`：是否只返回新增内容。
+- `limit_per_feed`：每个 Feed 最多返回条数。
+- `mark_as_seen`：是否把返回条目标记为已读。
 
+适合 LLM 主动问：“我有哪些 RSS 更新？”时调用。
 
-## 限制
+### `rss_update_settings`
 
-由于 QQ 官方对主动消息限制较为严重，因此主动推送不支持 qqofficial 消息平台。
+更新 RSS 插件运行时设置。该设置会写入数据文件 `settings`，插件重启后继续生效。
 
-## 贡献
+参数：
 
-欢迎提交 issue 和 pull request 来帮助改进这个项目。
+- `proxy_url`：全局代理地址，例如 `http://127.0.0.1:7890`。
+- `clear_proxy`：清空当前代理。
+- `default_interval_minutes`：默认订阅拉取间隔。
+- `max_items_per_poll`：每个订阅自动拉取时最多返回条数。
+- `max_item_chars`：单个 post 返回给 LLM 的最大字数。
+- `max_total_chars`：单次返回给 LLM 的总字数上限。
+
+## 配置项
+
+### LLM 主导推送
+
+#### `llm_mode_enabled`
+
+- 类型：`bool`
+- 默认值：`true`
+- 说明：开启后，自动拉取到新 RSS 内容时会先交给 LLM 生成最终回复；关闭后使用辅助文本推送。
+
+#### `llm_prompt_template`
+
+- 类型：`text`
+- 说明：RSS 更新触发 LLM 时使用的提示词模板。
+
+可用占位符：
+
+- `{{session_id}}`：订阅会话 UMO。
+- `{{subscriber_kind}}`：订阅来源，`llm` 或 `user`。
+- `{{feed_title}}`：订阅源标题。
+- `{{feed_url}}`：订阅源 URL。
+- `{{current_time}}`：当前时间。
+- `{{item_count}}`：本次更新条目数。
+- `{{rss_items}}`：结构化 RSS JSON 内容。
+
+#### `preserve_reasoning_in_history`
+
+- 类型：`bool`
+- 默认值：`true`
+- 说明：如果模型返回 `reasoning_content`，写入 AstrBot 对话历史时会以 `think` 内容保存。
+
+#### `send_user_fallback_on_llm_error`
+
+- 类型：`bool`
+- 默认值：`true`
+- 说明：LLM 调用失败时，回退为直接发送 RSS 文本摘要。
+
+### 拉取间隔与数量限制
+
+#### `default_interval_minutes`
+
+- 类型：`int`
+- 默认值：`60`
+- 说明：新增订阅未指定间隔时使用。
+
+#### `max_items_per_poll`
+
+- 类型：`int`
+- 默认值：`5`
+- 说明：每个订阅每次自动拉取的最大条目数。
+
+#### `hard_max_items_per_fetch`
+
+- 类型：`int`
+- 默认值：`50`
+- 说明：单次抓取硬上限，防止 LLM tool 或异常 Feed 一次返回过多内容。
+
+#### `max_item_chars`
+
+- 类型：`int`
+- 默认值：`1200`
+- 说明：单个 post 返回给 LLM 的最大字数。
+
+#### `max_total_chars`
+
+- 类型：`int`
+- 默认值：`8000`
+- 说明：单次返回给 LLM 的总字数上限。
+
+#### `history_seen_limit`
+
+- 类型：`int`
+- 默认值：`500`
+- 说明：每个订阅保留的历史去重 ID 数量。
+
+### 代理与安全
+
+#### `proxy_url`
+
+- 类型：`string`
+- 默认值：空
+- 说明：全局代理地址。配置后优先走代理。
+
+#### `trust_env`
+
+- 类型：`bool`
+- 默认值：`true`
+- 说明：是否读取系统环境代理。
+
+#### `proxy_timeout_fallback`
+
+- 类型：`bool`
+- 默认值：`true`
+- 说明：配置代理时，如果代理请求失败或超时，是否回退直连。
+
+#### `allow_private_network`
+
+- 类型：`bool`
+- 默认值：`false`
+- 说明：是否允许访问 localhost、内网、保留地址。默认关闭以降低 SSRF 风险。
+
+#### `max_response_bytes`
+
+- 类型：`int`
+- 默认值：`2097152`
+- 说明：Feed 响应体最大字节数，默认 2 MB。
+
+### 辅助文本推送配置
+
+以下配置只影响非 LLM 模式或 LLM 失败时的辅助推送：
+
+- `title_max_length`
+- `description_max_length`
+- `compose`
+- `t2i`
+- `is_hide_url`
+- `pic_config.is_read_pic`
+- `pic_config.is_adjust_pic`
+- `pic_config.max_pic_item`
+
+## 数据结构
+
+数据文件默认仍位于：
+
+```text
+data/astrbot_plugin_rss_data.json
+```
+
+新版结构大致如下：
+
+```json
+{
+  "rsshub_endpoints": [],
+  "settings": {
+    "proxy_url": "http://127.0.0.1:7890",
+    "default_interval_minutes": 60
+  },
+  "https://example.com/feed.xml": {
+    "info": {
+      "title": "Example Feed",
+      "description": "..."
+    },
+    "state": {
+      "last_update": 0,
+      "latest_link": "",
+      "seen_ids": []
+    },
+    "subscribers": {
+      "default:FriendMessage:123456": {
+        "interval_minutes": 60,
+        "last_update": 0,
+        "latest_link": "",
+        "seen_ids": [],
+        "enabled": true,
+        "subscriber_kind": "llm",
+        "created_at": 0
+      }
+    }
+  }
+}
+```
+
+旧版 `cron_expr` 订阅会在插件初始化时尽量迁移为 `interval_minutes`。
+
+## 多媒体策略
+
+当前不会把音频、视频等多媒体直接放入 LLM 上下文。
+
+处理方式：
+
+- 图片：作为链接字段提供，辅助推送模式可按原配置尝试发送图片。
+- 音频：用 `[音频] <url>` 占位。
+- 视频：用 `[视频] <url>` 占位。
+- 其他附件：用 `[媒体] <url>` 占位。
+
+这能避免把大文件或不稳定多媒体内容直接塞进 LLM 上下文。
+
+## 与旧版差异
+
+- 移除主要流程中的 cron 表达式输入，改为 `interval_minutes`。
+- RSSHub endpoint 管理不再作为主入口；如需 RSSHub，请直接订阅完整 RSSHub URL。
+- RSS 内容不再默认直接推给用户，而是优先交给 LLM 处理。
+- Feed 格式从原 RSS 2.0 扩展到 RSS / RDF / Atom / JSON Feed。
+- 新增代理、SSRF 防护、响应体大小限制、历史去重和 LLM 字数限制。
+
+## 注意事项
+
+- 插件需要在 AstrBot 运行环境内加载，独立目录下 VS Code 可能会提示 `astrbot` 相关导入无法解析。
+- 当前发送链路保持轻量化，没有完整复刻主动消息插件的 TTS、分段、装饰钩子链路。
+- 自动触发 LLM 需要当前会话有可用的聊天模型 Provider。
+- `allow_private_network` 默认关闭，如果你的 RSSHub 部署在内网，需要手动开启。
+
+## 验证建议
+
+1. 在 AstrBot 中加载插件，确认 LLM tools 注册成功。
+2. 调用 `rss_subscribe_feed` 订阅一个真实 Feed。
+3. 调用 `rss_fetch_items` 确认结构化条目可返回给 LLM。
+4. 手动触发一次 `cron_task_callback` 或等待定时任务，确认能调用 LLM 并发送最终回复。
+5. 查看 AstrBot 对话历史，确认主动 RSS 回合已落盘。

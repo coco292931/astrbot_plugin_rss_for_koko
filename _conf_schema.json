@@ -1,65 +1,150 @@
 {
     "title_max_length": {
-        "description": "推送的标题最大长度，超过会被截取",
+        "description": "辅助用户命令中显示的标题最大长度",
         "type": "int",
-        "hint": "推送的标题最大长度。",
+        "hint": "仅影响传统文本推送/命令展示，不影响 LLM 工具返回的结构化字段。",
         "obvious_hint": true,
-        "default": 30
+        "default": 80
     },
     "description_max_length": {
-        "description": "推送的描述最大长度，超过会被截取",
+        "description": "辅助用户命令中显示的描述最大长度",
         "type": "int",
-        "hint": "推送的描述最大长度。",
+        "hint": "仅影响传统文本推送/命令展示。LLM 模式由 max_item_chars 控制。",
         "obvious_hint": true,
+        "default": 800
+    },
+    "llm_mode_enabled": {
+        "description": "启用 LLM 主导推送",
+        "type": "bool",
+        "hint": "开启后，订阅自动拉取到新内容时会先交给 LLM 生成最终回复，再发送给订阅会话。关闭后使用原始 RSS 文本推送。",
+        "default": true
+    },
+    "llm_prompt_template": {
+        "description": "RSS 更新触发 LLM 时使用的提示词模板",
+        "type": "text",
+        "hint": "可用占位符：{{session_id}}、{{subscriber_kind}}、{{feed_title}}、{{feed_url}}、{{current_time}}、{{item_count}}、{{rss_items}}。",
+        "default": "[系统任务：RSS 订阅更新]\n订阅者会话：{{session_id}}\n订阅来源：{{subscriber_kind}}（llm 表示由工具订阅，user 表示由用户命令订阅）\n订阅源：{{feed_title}}\n订阅地址：{{feed_url}}\n当前时间：{{current_time}}\n更新数量：{{item_count}}\n\n以下是插件解析后的 RSS 更新内容（JSON）。请结合你的人格、当前会话上下文和这些 RSS 更新，自行判断重点，并用自然方式告诉用户。不要逐字段机械复述；如果内容不值得提醒，可以简短说明。多媒体内容不要假装已经观看，遇到 [音频]、[视频] 等占位符只说明有对应附件或链接。\n\n{{rss_items}}"
+    },
+    "preserve_reasoning_in_history": {
+        "description": "落盘时保留 LLM 思考内容",
+        "type": "bool",
+        "hint": "若当前模型返回 reasoning_content，会作为 think 内容写入 AstrBot 对话历史。",
+        "default": true
+    },
+    "send_user_fallback_on_llm_error": {
+        "description": "LLM 失败时回退发送 RSS 原文",
+        "type": "bool",
+        "hint": "开启后，LLM 调用失败时仍向订阅会话发送结构化 RSS 文本摘要，避免完全漏推。",
+        "default": true
+    },
+    "default_interval_minutes": {
+        "description": "默认自动拉取间隔（分钟）",
+        "type": "int",
+        "hint": "新增订阅未指定间隔时使用；替代原版手动 cron 表达式。",
+        "obvious_hint": true,
+        "default": 60
+    },
+    "max_items_per_poll": {
+        "description": "单个订阅每次自动拉取的最大条目数",
+        "type": "int",
+        "hint": "-1 表示不限制，但仍受 hard_max_items_per_fetch 保护。",
+        "obvious_hint": true,
+        "default": 5
+    },
+    "hard_max_items_per_fetch": {
+        "description": "单次抓取硬上限",
+        "type": "int",
+        "hint": "防止 LLM 工具或异常 Feed 一次返回过多内容。",
+        "default": 50
+    },
+    "max_item_chars": {
+        "description": "单个 post 返回给 LLM 的最大字数",
+        "type": "int",
+        "hint": "工具和自动 LLM 推送都会使用该限制。",
+        "default": 1200
+    },
+    "max_total_chars": {
+        "description": "单次返回给 LLM 的总字数上限",
+        "type": "int",
+        "hint": "超过后会截断，避免上下文过长。",
+        "default": 8000
+    },
+    "history_seen_limit": {
+        "description": "每个订阅保留的历史去重 ID 数量",
+        "type": "int",
+        "hint": "越大越不容易重复，但数据文件会更大。",
         "default": 500
     },
-    "compose": {
-        "description": "（仅限qq）是否将消息合并，以转发的方式组合发送",
+    "proxy_url": {
+        "description": "全局代理地址",
+        "type": "string",
+        "hint": "例如 http://127.0.0.1:7890。配置后优先走代理；代理超时可按配置回退直连。",
+        "default": ""
+    },
+    "trust_env": {
+        "description": "是否读取系统环境代理",
         "type": "bool",
-        "hint": "是否将消息合并，以转发的方式组合发送",
+        "hint": "仅在未配置 proxy_url 或回退直连时生效。",
+        "default": true
+    },
+    "proxy_timeout_fallback": {
+        "description": "代理超时后回退直连",
+        "type": "bool",
+        "hint": "只在 proxy_url 非空时生效。",
+        "default": true
+    },
+    "allow_private_network": {
+        "description": "允许访问 localhost/内网地址",
+        "type": "bool",
+        "hint": "默认关闭以降低 SSRF 风险。若 RSSHub 部署在内网，需要手动开启。",
+        "default": false
+    },
+    "max_response_bytes": {
+        "description": "Feed 响应体最大字节数",
+        "type": "int",
+        "hint": "超过会中止读取，避免异常 Feed 占用过多内存。",
+        "default": 2097152
+    },
+    "compose": {
+        "description": "（辅助模式，仅限 qq）是否将消息合并，以转发的方式组合发送",
+        "type": "bool",
+        "hint": "LLM 主导模式下通常不需要合并转发。",
         "default": true
     },
     "t2i": {
-        "description": "是否需要将文字转换为图片发送",
+        "description": "辅助文本推送是否转换为图片发送",
         "type": "bool",
-        "hint": "订阅中的图片内容会丢失",
+        "hint": "订阅中的图片内容会丢失；LLM 主导推送默认发送 LLM 输出文本。",
         "default": false
     },
-    "max_items_per_poll": {
-        "description": "每次获取的最大条目数。",
-        "type": "int",
-        "hint": "每次获取的最大条目数。 -1 表示不限制。",
-        "obvious_hint": true,
-        "default": 3
-    },
     "is_hide_url": {
-        "description": "是否隐藏链接",
+        "description": "辅助推送是否隐藏链接",
         "type": "bool",
-        "hint": "如果设置为 true 则在推送的消息中不显示链接。（解决发送链接导致风控）",
+        "hint": "如果设置为 true 则传统文本推送中不显示链接。",
         "obvious_hint": true,
         "default": false
     },
     "pic_config": {
-        "description": "图片相关配置",
+        "description": "图片相关配置（辅助用户推送使用）",
         "type": "object",
-        "hint": "用于配置图片相关的参数",
+        "hint": "LLM 模式暂不把多媒体直接注入上下文，只提供链接或占位符。",
         "items": {
             "is_read_pic": {
-                "description": "是否读取rss链接中的图片",
-                "hint": "如果设置为 true 自动读取rss链接中的图片",
+                "description": "是否读取 RSS 链接中的图片",
+                "hint": "如果设置为 true，辅助文本推送会尝试发送图片。",
                 "type": "bool",
                 "default": false
             },
             "is_adjust_pic": {
                 "description": "是否对图片进行防和谐处理",
                 "type": "bool",
-                "hint": "如果设置为 true 会自动在读取到的图片中的任意四个角的像素点上加上一个随机的像素点",
+                "hint": "如果设置为 true 会修改读取图片角落像素。",
                 "default": false
             },
             "max_pic_item": {
-                "description": "每次获取的最大图片条目数。",
+                "description": "每次获取的最大图片条目数",
                 "type": "int",
-                "hint": "每次转换图片的最大条目数。 -1 表示不限制。",
+                "hint": "-1 表示不限制。",
                 "default": 3
             }
         }
