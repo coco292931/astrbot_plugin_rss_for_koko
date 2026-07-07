@@ -402,12 +402,15 @@ class RssPlugin(Star):
         for item in items:
             identity = item.identity()
             if only_new:
+                # 优先用 seen_ids 去重；seen_ids 为空时才退化为时间戳/链接兜底
                 if identity and identity in seen_set:
                     continue
-                if after_timestamp and item.pubDate_timestamp and item.pubDate_timestamp <= after_timestamp:
-                    continue
-                if not item.pubDate_timestamp and after_link and item.link == after_link:
-                    continue
+                if not seen_set:
+                    # seen_ids 尚未建立（首次订阅后数据迁移场景），用时间戳兜底
+                    if after_timestamp and item.pubDate_timestamp and item.pubDate_timestamp <= after_timestamp:
+                        continue
+                    if not item.pubDate_timestamp and after_link and item.link == after_link:
+                        continue
             filtered.append(item)
             if limit != -1 and len(filtered) >= limit:
                 break
@@ -602,11 +605,8 @@ class RssPlugin(Star):
             )
         return items
 
-    # 时间戳合理性上限：当前年份 + 10 年，防止异常未来年份污染 last_update
-    _MAX_REASONABLE_TIMESTAMP = 32503680000  # 约 3000 年 1 月 1 日
-
     def _parse_datetime_to_timestamp(self, value: str) -> int:
-        """兼容多种 RSS/Atom 日期格式。年份异常（>3000年）时返回 0，退化为 seen_ids 去重。"""
+        """兼容多种 RSS/Atom 日期格式。"""
         if not value:
             return 0
         try:
@@ -618,11 +618,7 @@ class RssPlugin(Star):
                 return 0
         if not dt.tzinfo:
             dt = dt.replace(tzinfo=timezone.utc)
-        ts = int(dt.timestamp())
-        if ts > self._MAX_REASONABLE_TIMESTAMP:
-            self.logger.warning(f"rss: 忽略异常未来时间戳 {ts}（原始值: {value!r}），将使用 seen_ids 去重")
-            return 0
-        return ts
+        return int(dt.timestamp())
 
     def _content_hash(self, *parts: str) -> str:
         """为缺少 guid/link 的条目生成内容哈希。"""
@@ -1053,12 +1049,8 @@ class RssPlugin(Star):
         sub_info = feed_data.get("subscribers", {}).get(user)
         if not isinstance(sub_info, dict):
             return
-        # 只取合理范围内的时间戳，避免异常未来年份污染 last_update
-        valid_timestamps = [
-            ts for ts in [item.pubDate_timestamp for item in items]
-            if 0 < ts <= self._MAX_REASONABLE_TIMESTAMP
-        ]
-        max_ts = max([int(sub_info.get("last_update", 0) or 0), *valid_timestamps]) if valid_timestamps else int(sub_info.get("last_update", 0) or 0)
+        # last_update 记录本地推送时间，不信任远端 pubDate，避免异常未来时间戳污染过滤条件
+        max_ts = int(time.time())
         sub_info["last_update"] = max_ts
         sub_info["latest_link"] = items[0].link if items else sub_info.get("latest_link", "")
         seen = list(sub_info.get("seen_ids", []))
@@ -1120,11 +1112,10 @@ class RssPlugin(Star):
                 sub_payload["seen_ids"] = [
                     item.identity() for item in latest_items if item.identity()
                 ][: self.history_seen_limit]
-                sub_payload["last_update"] = max(item.pubDate_timestamp for item in latest_items)
                 sub_payload["latest_link"] = latest_items[0].link
+                # last_update 不使用远端 pubDate，保持 0 直到首次本地推送后再由 _mark_items_seen 写入本地时间
                 state = self.data_handler.data[url].setdefault("state", {})
                 state["seen_ids"] = sub_payload["seen_ids"]
-                state["last_update"] = sub_payload["last_update"]
                 state["latest_link"] = sub_payload["latest_link"]
                 self.data_handler.save_data()
         except Exception as e:
