@@ -8,6 +8,7 @@ from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
 from lxml import etree
 
+
 class DataHandler:
     """RSS 插件数据读写与轻量内容清洗。"""
 
@@ -128,8 +129,8 @@ class DataHandler:
         soup = BeautifulSoup(html, "html.parser")
         ordered_content = []
 
-        for img in soup.find_all('img'):
-            img_src = img.get('src') or img.get('data-src')
+        for img in soup.find_all("img"):
+            img_src = img.get("src") or img.get("data-src")
             if img_src:
                 ordered_content.append(urljoin(base_url, img_src))
 

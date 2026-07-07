@@ -10,7 +10,7 @@ import re
 import socket
 import time
 import traceback
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from email.utils import parsedate_to_datetime
 from typing import Any
 from urllib.parse import urljoin, urlparse
@@ -21,13 +21,18 @@ from dateutil import parser as date_parser
 from lxml import etree
 
 from astrbot.api import AstrBotConfig
-from astrbot.api.event import AstrMessageEvent, MessageChain, MessageEventResult, filter
+from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 import astrbot.api.message_components as Comp
 from astrbot.api.star import Context, Star, StarTools, register
 from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
 try:
-    from astrbot.core.agent.message import AssistantMessageSegment, TextPart, ThinkPart, UserMessageSegment
+    from astrbot.core.agent.message import (
+        AssistantMessageSegment,
+        TextPart,
+        ThinkPart,
+        UserMessageSegment,
+    )
 except Exception:  # pragma: no cover - older AstrBot fallback
     AssistantMessageSegment = None
     TextPart = None
@@ -35,7 +40,11 @@ except Exception:  # pragma: no cover - older AstrBot fallback
     UserMessageSegment = None
 
 try:
-    from astrbot.core.platform.astrbot_message import AstrBotMessage, Group, MessageMember
+    from astrbot.core.platform.astrbot_message import (
+        AstrBotMessage,
+        Group,
+        MessageMember,
+    )
     from astrbot.core.platform.message_type import MessageType
     from astrbot.core.platform.platform import PlatformStatus
 except Exception:  # pragma: no cover - optional precise platform sending
@@ -54,7 +63,9 @@ except ImportError:  # pragma: no cover - compatibility with older AstrBot
         MS = None
 
 try:
-    from astrbot.core.platform.sources.webchat.message_parts_helper import message_chain_to_storage_message_parts
+    from astrbot.core.platform.sources.webchat.message_parts_helper import (
+        message_chain_to_storage_message_parts,
+    )
 except Exception:  # pragma: no cover - optional history persistence helper
     message_chain_to_storage_message_parts = None
 
@@ -76,9 +87,11 @@ PLUGIN_NAME = "astrbot_plugin_rss_for_koko"
 class RssPlugin(Star):
     """RSS 订阅插件：以 LLM 为主、用户为辅处理订阅更新。"""
 
-    USER_AGENT = "AstrBot-RSS-LLM/1.2 (+https://github.com/coco292931/astrbot_plugin_rss)"
+    USER_AGENT = (
+        "AstrBot-RSS-LLM/1.2 (+https://github.com/coco292931/astrbot_plugin_rss)"
+    )
     IMAGE_CAPTION_PROMPT = "请用中文简洁转述这张 RSS 内容中的 {image_type}。只描述图片实际内容，不要输出图片占位符。"
-    IMAGE_CAPTION_PROMPT = '' #故意的
+    IMAGE_CAPTION_PROMPT = ""  # 故意的
 
     def __init__(self, context: Context, config: AstrBotConfig) -> None:
         super().__init__(context)
@@ -112,8 +125,12 @@ class RssPlugin(Star):
             "image_caption_timeout_seconds",
             45,
         )
-        self.preserve_reasoning_in_history = bool(config.get("preserve_reasoning_in_history", True))
-        self.send_user_fallback_on_llm_error = bool(config.get("send_user_fallback_on_llm_error", True))
+        self.preserve_reasoning_in_history = bool(
+            config.get("preserve_reasoning_in_history", True)
+        )
+        self.send_user_fallback_on_llm_error = bool(
+            config.get("send_user_fallback_on_llm_error", True)
+        )
 
         self.proxy_url = (config.get("proxy_url") or "").strip()
         self.trust_env = bool(config.get("trust_env", True))
@@ -198,13 +215,19 @@ class RssPlugin(Star):
 
             for user, sub_info in list(info.get("subscribers", {}).items()):
                 if not isinstance(sub_info, dict):
-                    info["subscribers"][user] = self._new_subscription_payload(self.default_interval_minutes)
+                    info["subscribers"][user] = self._new_subscription_payload(
+                        self.default_interval_minutes
+                    )
                     changed = True
                     continue
                 if "interval_minutes" not in sub_info:
-                    sub_info["interval_minutes"] = self._interval_from_legacy_cron(sub_info.get("cron_expr", ""))
+                    sub_info["interval_minutes"] = self._interval_from_legacy_cron(
+                        sub_info.get("cron_expr", "")
+                    )
                     changed = True
-                sub_info.setdefault("last_update", int(sub_info.get("last_update", 0) or 0))
+                sub_info.setdefault(
+                    "last_update", int(sub_info.get("last_update", 0) or 0)
+                )
                 sub_info.setdefault("latest_link", sub_info.get("latest_link", ""))
                 sub_info.setdefault("seen_ids", [])
                 sub_info.setdefault("enabled", True)
@@ -338,15 +361,23 @@ class RssPlugin(Star):
             self.logger.warning(f"rss: 代理获取失败，尝试直连 {url}")
         return await self._fetch_url(url, proxy=None, trust_env=self.trust_env)
 
-    async def _fetch_url(self, url: str, *, proxy: str | None, trust_env: bool) -> bytes | None:
+    async def _fetch_url(
+        self, url: str, *, proxy: str | None, trust_env: bool
+    ) -> bytes | None:
         """执行一次 HTTP 获取并限制响应体大小。"""
         headers = {"User-Agent": self.USER_AGENT}
         timeout = aiohttp.ClientTimeout(total=30, connect=10, sock_read=20)
         try:
-            async with aiohttp.ClientSession(timeout=timeout, headers=headers, trust_env=trust_env) as session:
-                async with session.get(url, proxy=proxy, allow_redirects=True, max_redirects=5) as resp:
+            async with aiohttp.ClientSession(
+                timeout=timeout, headers=headers, trust_env=trust_env
+            ) as session:
+                async with session.get(
+                    url, proxy=proxy, allow_redirects=True, max_redirects=5
+                ) as resp:
                     if resp.status != 200:
-                        self.logger.error(f"rss: 无法正常打开站点 {url}，状态码 {resp.status}")
+                        self.logger.error(
+                            f"rss: 无法正常打开站点 {url}，状态码 {resp.status}"
+                        )
                         return None
                     chunks = []
                     total = 0
@@ -407,9 +438,17 @@ class RssPlugin(Star):
                     continue
                 if not seen_set:
                     # seen_ids 尚未建立（首次订阅后数据迁移场景），用时间戳兜底
-                    if after_timestamp and item.pubDate_timestamp and item.pubDate_timestamp <= after_timestamp:
+                    if (
+                        after_timestamp
+                        and item.pubDate_timestamp
+                        and item.pubDate_timestamp <= after_timestamp
+                    ):
                         continue
-                    if not item.pubDate_timestamp and after_link and item.link == after_link:
+                    if (
+                        not item.pubDate_timestamp
+                        and after_link
+                        and item.link == after_link
+                    ):
                         continue
             filtered.append(item)
             if limit != -1 and len(filtered) >= limit:
@@ -447,7 +486,9 @@ class RssPlugin(Star):
                 items.append(item)
         return items
 
-    def _xml_node_to_item(self, node, feed_url: str, channel_title: str) -> RSSItem | None:
+    def _xml_node_to_item(
+        self, node, feed_url: str, channel_title: str
+    ) -> RSSItem | None:
         """将 XML item/entry 节点转换为 RSSItem。"""
         title = self._node_text(node, ["title"]) or "无标题"
         link = self._node_link(node, feed_url)
@@ -456,14 +497,24 @@ class RssPlugin(Star):
         raw_content = self._node_text(node, ["encoded", "content"]) or raw_description
         description = self.data_handler.strip_html(raw_description or raw_content)
         content = self.data_handler.strip_html(raw_content or raw_description)
-        pub_date = self._node_text(node, ["pubDate", "published", "updated", "date", "created"])
+        pub_date = self._node_text(
+            node, ["pubDate", "published", "updated", "date", "created"]
+        )
         pub_ts = self._parse_datetime_to_timestamp(pub_date)
         author = self._node_text(node, ["author", "creator", "name"])
-        tags = [str(x).strip() for x in node.xpath("./*[local-name()='category']/text()") if str(x).strip()]
-        pic_urls = self.data_handler.strip_html_pic(raw_content or raw_description, feed_url)
+        tags = [
+            str(x).strip()
+            for x in node.xpath("./*[local-name()='category']/text()")
+            if str(x).strip()
+        ]
+        pic_urls = self.data_handler.strip_html_pic(
+            raw_content or raw_description, feed_url
+        )
         pic_urls.extend(self._extract_image_links(node, feed_url))
         pic_urls = list(dict.fromkeys(pic_urls))
-        media_urls = self.data_handler.strip_html_media(raw_content or raw_description, feed_url)
+        media_urls = self.data_handler.strip_html_media(
+            raw_content or raw_description, feed_url
+        )
         media_urls.extend(self._extract_media_links(node, feed_url))
         content_hash = self._content_hash(title, link, content or description)
         if not link:
@@ -518,21 +569,31 @@ class RssPlugin(Star):
     def _extract_media_links(self, node, feed_url: str) -> list[str]:
         """提取 media/enclosure 等附件链接，用占位符交给 LLM。"""
         media_urls = []
-        for media_node in node.xpath("./*[local-name()='enclosure' or local-name()='content' or local-name()='thumbnail']"):
+        for media_node in node.xpath(
+            "./*[local-name()='enclosure' or local-name()='content' or local-name()='thumbnail']"
+        ):
             media_url = media_node.get("url") or media_node.get("href")
             if not media_url:
                 continue
             media_type = (media_node.get("type") or "").lower()
             if media_type.startswith("image"):
                 continue
-            label = "音频" if media_type.startswith("audio") else "视频" if media_type.startswith("video") else "媒体"
+            label = (
+                "音频"
+                if media_type.startswith("audio")
+                else "视频"
+                if media_type.startswith("video")
+                else "媒体"
+            )
             media_urls.append(f"[{label}] {urljoin(feed_url, media_url)}")
         return media_urls
 
     def _extract_image_links(self, node, feed_url: str) -> list[str]:
         """提取 enclosure/media:content/media:thumbnail 中的图片/GIF 链接。"""
         image_urls = []
-        for media_node in node.xpath("./*[local-name()='enclosure' or local-name()='content' or local-name()='thumbnail']"):
+        for media_node in node.xpath(
+            "./*[local-name()='enclosure' or local-name()='content' or local-name()='thumbnail']"
+        ):
             media_url = media_node.get("url") or media_node.get("href")
             if not media_url:
                 continue
@@ -541,7 +602,9 @@ class RssPlugin(Star):
             is_image = (
                 tag_name == "thumbnail"
                 or media_type.startswith("image")
-                or bool(re.search(r"\.(?:png|jpe?g|gif|webp)(?:$|[?#])", media_url, re.I))
+                or bool(
+                    re.search(r"\.(?:png|jpe?g|gif|webp)(?:$|[?#])", media_url, re.I)
+                )
             )
             if is_image:
                 image_urls.append(urljoin(feed_url, media_url))
@@ -559,16 +622,31 @@ class RssPlugin(Star):
             if not isinstance(item, dict):
                 continue
             title = str(item.get("title") or item.get("summary") or "无标题")
-            link = urljoin(feed_url, str(item.get("url") or item.get("external_url") or ""))
+            link = urljoin(
+                feed_url, str(item.get("url") or item.get("external_url") or "")
+            )
             guid = str(item.get("id") or link or "")
-            raw_content = str(item.get("content_html") or item.get("content_text") or item.get("summary") or "")
-            description = self.data_handler.strip_html(str(item.get("summary") or raw_content))
+            raw_content = str(
+                item.get("content_html")
+                or item.get("content_text")
+                or item.get("summary")
+                or ""
+            )
+            description = self.data_handler.strip_html(
+                str(item.get("summary") or raw_content)
+            )
             content = self.data_handler.strip_html(raw_content)
-            pub_date = str(item.get("date_published") or item.get("date_modified") or "")
+            pub_date = str(
+                item.get("date_published") or item.get("date_modified") or ""
+            )
             author = ""
             if isinstance(item.get("author"), dict):
                 author = str(item["author"].get("name") or "")
-            attachments = item.get("attachments") if isinstance(item.get("attachments"), list) else []
+            attachments = (
+                item.get("attachments")
+                if isinstance(item.get("attachments"), list)
+                else []
+            )
             pic_urls = self.data_handler.strip_html_pic(raw_content, feed_url)
             media_urls = []
             for attachment in attachments:
@@ -581,9 +659,19 @@ class RssPlugin(Star):
                 if media_type.startswith("image"):
                     pic_urls.append(urljoin(feed_url, media_url))
                     continue
-                label = "音频" if media_type.startswith("audio") else "视频" if media_type.startswith("video") else "媒体"
+                label = (
+                    "音频"
+                    if media_type.startswith("audio")
+                    else "视频"
+                    if media_type.startswith("video")
+                    else "媒体"
+                )
                 media_urls.append(f"[{label}] {urljoin(feed_url, media_url)}")
-            tags = [str(tag) for tag in item.get("tags", [])] if isinstance(item.get("tags"), list) else []
+            tags = (
+                [str(tag) for tag in item.get("tags", [])]
+                if isinstance(item.get("tags"), list)
+                else []
+            )
             items.append(
                 RSSItem(
                     channel_title,
@@ -600,7 +688,9 @@ class RssPlugin(Star):
                     media_urls=media_urls,
                     image_captions=[],
                     source_url=feed_url,
-                    content_hash=self._content_hash(title, link, content or description),
+                    content_hash=self._content_hash(
+                        title, link, content or description
+                    ),
                 )
             )
         return items
@@ -642,7 +732,13 @@ class RssPlugin(Star):
             for user, sub_info in info.get("subscribers", {}).items():
                 if not isinstance(sub_info, dict) or not sub_info.get("enabled", True):
                     continue
-                interval = max(1, int(sub_info.get("interval_minutes") or self.default_interval_minutes))
+                interval = max(
+                    1,
+                    int(
+                        sub_info.get("interval_minutes")
+                        or self.default_interval_minutes
+                    ),
+                )
                 self.scheduler.add_job(
                     self.cron_task_callback,
                     "interval",
@@ -656,7 +752,9 @@ class RssPlugin(Star):
 
     def _job_id(self, url: str, user: str) -> str:
         """生成稳定 scheduler job id。"""
-        digest = hashlib.sha1(f"{url}\n{user}".encode("utf-8", errors="ignore")).hexdigest()
+        digest = hashlib.sha1(
+            f"{url}\n{user}".encode("utf-8", errors="ignore")
+        ).hexdigest()
         return f"rss_{digest}"
 
     async def cron_task_callback(self, url: str, user: str):
@@ -679,7 +777,9 @@ class RssPlugin(Star):
         if not rss_items:
             poll_error = self._last_poll_errors.get(url)
             if poll_error:
-                self.logger.warning(f"RSS 定时任务 {url} 拉取失败 - {user}: {poll_error}")
+                self.logger.warning(
+                    f"RSS 定时任务 {url} 拉取失败 - {user}: {poll_error}"
+                )
             else:
                 self.logger.debug(f"RSS 定时任务 {url} 无消息更新 - {user}")
             return
@@ -707,13 +807,19 @@ class RssPlugin(Star):
         self.data_handler.save_data()
         self.logger.info(f"RSS 定时任务 {url} 推送完成 - {user}")
 
-    async def _send_items_via_llm(self, session_id: str, url: str, items: list[RSSItem]) -> bool:
+    async def _send_items_via_llm(
+        self, session_id: str, url: str, items: list[RSSItem]
+    ) -> bool:
         """将 RSS 更新作为任务交给 LLM，并发送 LLM 最终回复。"""
         await self._ensure_item_image_captions(items)
         prompt = self._build_llm_prompt(session_id, url, items)
         try:
             provider_id = await self.context.get_current_chat_provider_id(session_id)
-            conv_id, history_messages, system_prompt = await self._prepare_conversation_context(session_id)
+            (
+                conv_id,
+                history_messages,
+                system_prompt,
+            ) = await self._prepare_conversation_context(session_id)
             response = await self.context.llm_generate(
                 chat_provider_id=provider_id,
                 prompt=prompt,
@@ -731,22 +837,32 @@ class RssPlugin(Star):
             return False
 
         try:
-            await self._persist_llm_history(session_id, conv_id, prompt, response_text, response)
+            await self._persist_llm_history(
+                session_id, conv_id, prompt, response_text, response
+            )
         except Exception as e:
             self.logger.warning(f"rss: 写入 LLM 对话历史失败: {e}", exc_info=True)
         return True
 
-    async def _prepare_conversation_context(self, session_id: str) -> tuple[str, list[dict], str]:
+    async def _prepare_conversation_context(
+        self, session_id: str
+    ) -> tuple[str, list[dict], str]:
         """获取/创建会话对话，并读取历史与人格。"""
         conv_mgr = self.context.conversation_manager
         conv_id = await conv_mgr.get_curr_conversation_id(session_id)
         if not conv_id:
             conv_id = await conv_mgr.new_conversation(session_id)
-        conversation = await conv_mgr.get_conversation(session_id, conv_id, create_if_not_exists=True)
+        conversation = await conv_mgr.get_conversation(
+            session_id, conv_id, create_if_not_exists=True
+        )
         history_messages: list[dict] = []
         if conversation and conversation.history:
             try:
-                loaded = json.loads(conversation.history) if isinstance(conversation.history, str) else conversation.history
+                loaded = (
+                    json.loads(conversation.history)
+                    if isinstance(conversation.history, str)
+                    else conversation.history
+                )
                 if isinstance(loaded, list):
                     history_messages = loaded
             except Exception:
@@ -758,17 +874,28 @@ class RssPlugin(Star):
         """读取当前会话 persona，失败时回退为空系统提示。"""
         try:
             if conversation and getattr(conversation, "persona_id", None):
-                persona = await self.context.persona_manager.get_persona(conversation.persona_id)
+                persona = await self.context.persona_manager.get_persona(
+                    conversation.persona_id
+                )
                 if persona:
                     return persona.system_prompt
-            default_persona = await self.context.persona_manager.get_default_persona_v3(umo=session_id)
+            default_persona = await self.context.persona_manager.get_default_persona_v3(
+                umo=session_id
+            )
             if default_persona:
                 return default_persona.get("prompt", "")
         except Exception as e:
             self.logger.debug(f"rss: 获取人格失败: {e}")
         return ""
 
-    async def _persist_llm_history(self, session_id: str, conv_id: str, prompt: str, response_text: str, response: Any) -> None:
+    async def _persist_llm_history(
+        self,
+        session_id: str,
+        conv_id: str,
+        prompt: str,
+        response_text: str,
+        response: Any,
+    ) -> None:
         """把 RSS 主动 LLM 回合写入 AstrBot 对话历史，含可选思考内容。"""
         conv_mgr = self.context.conversation_manager
         reasoning = (getattr(response, "reasoning_content", None) or "").strip()
@@ -776,33 +903,68 @@ class RssPlugin(Star):
             user_msg = UserMessageSegment(content=[TextPart(text=prompt)])
             assistant_parts = []
             if self.preserve_reasoning_in_history and reasoning and ThinkPart:
-                assistant_parts.append(ThinkPart(think=reasoning, encrypted=getattr(response, "reasoning_signature", None)))
+                assistant_parts.append(
+                    ThinkPart(
+                        think=reasoning,
+                        encrypted=getattr(response, "reasoning_signature", None),
+                    )
+                )
             assistant_parts.append(TextPart(text=response_text))
             assistant_msg = AssistantMessageSegment(content=assistant_parts)
-            await conv_mgr.add_message_pair(cid=conv_id, user_message=user_msg, assistant_message=assistant_msg)
+            await conv_mgr.add_message_pair(
+                cid=conv_id, user_message=user_msg, assistant_message=assistant_msg
+            )
             return
-        conversation = await conv_mgr.get_conversation(session_id, conv_id, create_if_not_exists=True)
+        conversation = await conv_mgr.get_conversation(
+            session_id, conv_id, create_if_not_exists=True
+        )
         history = json.loads(conversation.history or "[]") if conversation else []
         history.append({"role": "user", "content": prompt})
         if self.preserve_reasoning_in_history and reasoning:
-            history.append({"role": "assistant", "content": [{"type": "think", "think": reasoning}, {"type": "text", "text": response_text}]})
+            history.append(
+                {
+                    "role": "assistant",
+                    "content": [
+                        {"type": "think", "think": reasoning},
+                        {"type": "text", "text": response_text},
+                    ],
+                }
+            )
         else:
             history.append({"role": "assistant", "content": response_text})
         await conv_mgr.update_conversation(session_id, conv_id, history=history)
 
     def _build_llm_prompt(self, session_id: str, url: str, items: list[RSSItem]) -> str:
-        """用配置模板渲染 RSS -> LLM 提示词。"""
+        """用配置模板渲染 RSS -> LLM 提示词，所有时间统一输出 +8 区。"""
         feed_info = self.data_handler.data.get(url, {}).get("info", {})
-        sub_info = self.data_handler.data.get(url, {}).get("subscribers", {}).get(session_id, {})
+        sub_info = (
+            self.data_handler.data.get(url, {})
+            .get("subscribers", {})
+            .get(session_id, {})
+        )
         subscriber_kind = sub_info.get("subscriber_kind", "user")
-        items_json = json.dumps(self._items_to_llm_payload(items), ensure_ascii=False, indent=2)
-        template = self.llm_prompt_template or self.config.get("llm_prompt_template") or "{{rss_items}}"
+        items_json = json.dumps(
+            self._items_to_llm_payload(items), ensure_ascii=False, indent=2
+        )
+        template = (
+            self.llm_prompt_template
+            or self.config.get("llm_prompt_template")
+            or "{{rss_items}}"
+        )
+        cst_now = datetime.now(timezone(timedelta(hours=8))).strftime(
+            "%Y-%m-%d %H:%M:%S %z"
+        )
         return (
             template.replace("{{session_id}}", session_id)
             .replace("{{subscriber_kind}}", str(subscriber_kind))
-            .replace("{{feed_title}}", str(feed_info.get("title", items[0].chan_title if items else "未知频道")))
+            .replace(
+                "{{feed_title}}",
+                str(
+                    feed_info.get("title", items[0].chan_title if items else "未知频道")
+                ),
+            )
             .replace("{{feed_url}}", url)
-            .replace("{{current_time}}", datetime.now().strftime("%Y-%m-%d %H:%M"))
+            .replace("{{current_time}}", cst_now)
             .replace("{{item_count}}", str(len(items)))
             .replace("{{rss_items}}", items_json)
         )
@@ -822,9 +984,15 @@ class RssPlugin(Star):
                 max_chars=0 if return_full_content else self.max_item_chars,
             )
             serialized = json.dumps(data, ensure_ascii=False)
-            if not return_full_content and self.max_total_chars > 0 and total + len(serialized) > self.max_total_chars:
+            if (
+                not return_full_content
+                and self.max_total_chars > 0
+                and total + len(serialized) > self.max_total_chars
+            ):
                 remaining = max(0, self.max_total_chars - total)
-                data["content"] = str(data.get("content", ""))[:remaining].rstrip() + "..."
+                data["content"] = (
+                    str(data.get("content", ""))[:remaining].rstrip() + "..."
+                )
                 payload.append(data)
                 break
             payload.append(data)
@@ -872,7 +1040,11 @@ class RssPlugin(Star):
 
     async def _caption_image_urls(self, image_urls: list[str]) -> list[dict[str, str]]:
         """跨插件调用 toolbox tool_image_caption，返回 url + caption 映射。"""
-        urls = list(dict.fromkeys([str(url or "").strip() for url in image_urls if str(url or "").strip()]))
+        urls = list(
+            dict.fromkeys(
+                [str(url or "").strip() for url in image_urls if str(url or "").strip()]
+            )
+        )
         if not urls:
             return []
 
@@ -927,24 +1099,65 @@ class RssPlugin(Star):
             message = result
         return self._parse_image_caption_message(urls, message)
 
-    def _parse_image_caption_message(self, image_urls: list[str], message: str) -> list[dict[str, str]]:
-        """解析 toolbox 转述结果，省略 [图片]/[GIF] 占位符但保留链接。"""
-        lines = [line.strip() for line in str(message or "").splitlines() if line.strip()]
-        captions = []
-        for idx, url in enumerate(image_urls):
-            line = lines[idx] if idx < len(lines) else ""
-            line = re.sub(r"^\d+[\.、]\s*", "", line).strip()
-            text = ""
-            match = re.match(r"^\[[^\]:：]+[:：]\s*(.*?)\]$", line, re.S)
-            if match:
-                text = match.group(1).strip()
-            elif re.match(r"^\[[^\]:：]+\]$", line):
-                text = ""
-            else:
-                text = line.strip()
-            if text:
-                captions.append({"url": url, "caption": '[图像]'+text})
-        return captions
+    def _parse_image_caption_message(
+        self, image_urls: list[str], message: str
+    ) -> list[dict[str, str]]:
+        """解析 toolbox 转述结果，返回 url + caption 映射。
+
+        支持两种格式：
+        1. 多行格式：每行 "n. [XXX: content]"，XXX 为 图片/GIF 等类型标签。
+        2. 单段纯文本：整段作为唯一图片的转述。
+
+        转述失败的图片不加入返回列表（后续回退到 URL 本身或 alt 标签）。
+        """
+        raw = str(message or "").strip()
+        if not raw:
+            return []
+
+        # 按行分割并尝试匹配 "n. [XXX: " 前缀模式
+        lines = [line.strip() for line in raw.splitlines() if line.strip()]
+        matched_lines: list[int] = []
+        for i, line in enumerate(lines):
+            # 匹配 "n. [XXX: content]" 或 "n.[XXX: content]"
+            stripped = re.sub(r"^\d+\s*[\.、]\s*", "", line)
+            if re.match(r"^\[[^\]]+[:：]\s*", stripped):
+                matched_lines.append(i)
+
+        if matched_lines:
+            # 多图模式：按行号索引
+            caption_map: dict[int, str] = {}
+            for i, line in enumerate(lines):
+                stripped = re.sub(r"^\d+\s*[\.、]\s*", "", line)
+                m = re.match(r"^\[[^\]:：]+[:：]\s*(.*?)\]$", stripped, re.S)
+                if m:
+                    caption_map[i] = m.group(1).strip()
+                else:
+                    # 行有数字前缀但不是标准格式，尝试直接去除数字前缀
+                    cleaned = re.sub(r"^\d+\s*[\.、]\s*", "", stripped)
+                    if cleaned and not re.match(r"^\[.*?\]$", cleaned):
+                        caption_map[i] = cleaned
+            captions = []
+            for idx, url in enumerate(image_urls):
+                line = caption_map.get(idx, "")
+                if line:
+                    captions.append({"url": url, "caption": line})
+            return captions
+
+        # 单图模式：整段消息是唯一图片的转述
+        if len(image_urls) == 1:
+            return [{"url": image_urls[0], "caption": raw}]
+
+        # 行数匹配图片数：逐行对应
+        if len(lines) >= len(image_urls):
+            captions = []
+            for idx, url in enumerate(image_urls):
+                text = lines[idx].strip()
+                if text:
+                    captions.append({"url": url, "caption": text})
+            return captions
+
+        # 无法解析：返回空，后续回退到 URL
+        return []
 
     async def _send_items_plain(self, session_id: str, items: list[RSSItem]) -> bool:
         """辅助模式：不经 LLM，直接发送 RSS 文本。返回是否至少送出一条。"""
@@ -978,7 +1191,9 @@ class RssPlugin(Star):
                 )
                 sent_any = True
             except Exception as e:
-                self.logger.warning(f"rss: 单条推送失败 {item.link}: {e}", exc_info=True)
+                self.logger.warning(
+                    f"rss: 单条推送失败 {item.link}: {e}", exc_info=True
+                )
         return sent_any
 
     async def _send_text_to_session(self, session_id: str, text: str) -> None:
@@ -988,12 +1203,27 @@ class RssPlugin(Star):
         if parsed and MS and MessageType:
             platform_id, msg_type_str, target_id = parsed
             platforms = self.context.platform_manager.get_insts()
-            target_platform = next((p for p in platforms if p.meta().id == platform_id), None)
-            is_running = target_platform and (not PlatformStatus or target_platform.status == PlatformStatus.RUNNING)
+            target_platform = next(
+                (p for p in platforms if p.meta().id == platform_id), None
+            )
+            is_running = target_platform and (
+                not PlatformStatus or target_platform.status == PlatformStatus.RUNNING
+            )
             if target_platform and is_running:
                 try:
-                    msg_type = MessageType.GROUP_MESSAGE if "Group" in msg_type_str or "Guild" in msg_type_str else MessageType.FRIEND_MESSAGE
-                    await target_platform.send_by_session(MS(platform_name=platform_id, message_type=msg_type, session_id=target_id), chain)
+                    msg_type = (
+                        MessageType.GROUP_MESSAGE
+                        if "Group" in msg_type_str or "Guild" in msg_type_str
+                        else MessageType.FRIEND_MESSAGE
+                    )
+                    await target_platform.send_by_session(
+                        MS(
+                            platform_name=platform_id,
+                            message_type=msg_type,
+                            session_id=target_id,
+                        ),
+                        chain,
+                    )
                     await self._persist_platform_history(session_id, chain)
                     return
                 except Exception as e:
@@ -1001,7 +1231,9 @@ class RssPlugin(Star):
         await self.context.send_message(session_id, chain)
         await self._persist_platform_history(session_id, chain)
 
-    async def _persist_platform_history(self, session_id: str, chain: MessageChain) -> None:
+    async def _persist_platform_history(
+        self, session_id: str, chain: MessageChain
+    ) -> None:
         """尽量补写平台消息流水，方便后续主动上下文读取。"""
         if message_chain_to_storage_message_parts is None:
             return
@@ -1013,7 +1245,9 @@ class RssPlugin(Star):
             return
         platform_id, _message_type, target_id = parsed
         try:
-            message_parts = await message_chain_to_storage_message_parts(chain, insert_attachment=insert_attachment, attachments_dir=None)
+            message_parts = await message_chain_to_storage_message_parts(
+                chain, insert_attachment=insert_attachment, attachments_dir=None
+            )
             if message_parts:
                 await history_mgr.insert(
                     platform_id=platform_id,
@@ -1029,11 +1263,16 @@ class RssPlugin(Star):
         """解析 UMO，兼容 target 中带冒号的情况。"""
         if not isinstance(session_id, str):
             return None
-        for msg_type in ["FriendMessage", "GroupMessage", "PrivateMessage", "GuildMessage"]:
+        for msg_type in [
+            "FriendMessage",
+            "GroupMessage",
+            "PrivateMessage",
+            "GuildMessage",
+        ]:
             marker = f":{msg_type}:"
             idx = session_id.find(marker)
             if idx != -1:
-                return session_id[:idx], msg_type, session_id[idx + len(marker):]
+                return session_id[:idx], msg_type, session_id[idx + len(marker) :]
         parts = session_id.split(":")
         if len(parts) == 3:
             return parts[0], parts[1], parts[2]
@@ -1052,7 +1291,9 @@ class RssPlugin(Star):
         # last_update 记录本地推送时间，不信任远端 pubDate，避免异常未来时间戳污染过滤条件
         max_ts = int(time.time())
         sub_info["last_update"] = max_ts
-        sub_info["latest_link"] = items[0].link if items else sub_info.get("latest_link", "")
+        sub_info["latest_link"] = (
+            items[0].link if items else sub_info.get("latest_link", "")
+        )
         seen = list(sub_info.get("seen_ids", []))
         for item in items:
             identity = item.identity()
@@ -1097,8 +1338,12 @@ class RssPlugin(Star):
                 "state": {},
             }
         else:
-            self.data_handler.data[url].setdefault("info", {"title": title, "description": desc})
-            self.data_handler.data[url]["info"].update({"title": title, "description": desc})
+            self.data_handler.data[url].setdefault(
+                "info", {"title": title, "description": desc}
+            )
+            self.data_handler.data[url]["info"].update(
+                {"title": title, "description": desc}
+            )
             self.data_handler.data[url].setdefault("subscribers", {})
             self.data_handler.data[url].setdefault("state", {})
         self.data_handler.data[url]["subscribers"][user] = sub_payload
@@ -1106,9 +1351,17 @@ class RssPlugin(Star):
         self._fresh_asyncIOScheduler()
 
         try:
-            latest_items = self._parse_json_feed(text, url) if self._looks_like_json(text) else self._parse_xml_feed(text, url)
-            latest_items = latest_items[: self._normalize_limit(self.max_items_per_poll)]
-            if latest_items and user in self.data_handler.data[url].get("subscribers", {}):
+            latest_items = (
+                self._parse_json_feed(text, url)
+                if self._looks_like_json(text)
+                else self._parse_xml_feed(text, url)
+            )
+            latest_items = latest_items[
+                : self._normalize_limit(self.max_items_per_poll)
+            ]
+            if latest_items and user in self.data_handler.data[url].get(
+                "subscribers", {}
+            ):
                 sub_payload["seen_ids"] = [
                     item.identity() for item in latest_items if item.identity()
                 ][: self.history_seen_limit]
@@ -1124,17 +1377,29 @@ class RssPlugin(Star):
 
     async def _get_chain_components(self, item: RSSItem):
         """组装辅助模式消息链。"""
-        comps = [Comp.Plain(f"频道 {item.chan_title} 最新 Feed\n---\n标题: {item.title}\n---\n")]
+        comps = [
+            Comp.Plain(
+                f"频道 {item.chan_title} 最新 Feed\n---\n标题: {item.title}\n---\n"
+            )
+        ]
         if not self.is_hide_url:
             comps.append(Comp.Plain(f"链接: {item.link}\n---\n"))
         comps.append(Comp.Plain((item.description or item.content or "") + "\n---\n"))
         if item.media_urls:
             comps.append(Comp.Plain("\n".join(item.media_urls) + "\n---\n"))
         if self.is_read_pic and item.pic_urls:
-            temp_max_pic_item = len(item.pic_urls) if self.max_pic_item == -1 else self.max_pic_item
+            temp_max_pic_item = (
+                len(item.pic_urls) if self.max_pic_item == -1 else self.max_pic_item
+            )
             for pic_url in item.pic_urls[:temp_max_pic_item]:
-                base64str = await self.pic_handler.modify_corner_pixel_to_base64(pic_url)
-                comps.append(Comp.Image.fromBase64(base64str) if base64str else Comp.Plain("图片链接读取失败\n"))
+                base64str = await self.pic_handler.modify_corner_pixel_to_base64(
+                    pic_url
+                )
+                comps.append(
+                    Comp.Image.fromBase64(base64str)
+                    if base64str
+                    else Comp.Plain("图片链接读取失败\n")
+                )
         return comps
 
     def _format_subscription_list(self, user: str) -> str:
@@ -1146,7 +1411,9 @@ class RssPlugin(Star):
         for idx, url in enumerate(subs_urls):
             info = self.data_handler.data[url].get("info", {})
             sub = self.data_handler.data[url].get("subscribers", {}).get(user, {})
-            lines.append(f"{idx}. {info.get('title', '未知频道')} - 每 {sub.get('interval_minutes', self.default_interval_minutes)} 分钟 - {url}")
+            lines.append(
+                f"{idx}. {info.get('title', '未知频道')} - 每 {sub.get('interval_minutes', self.default_interval_minutes)} 分钟 - {url}"
+            )
         return "\n".join(lines)
 
     @filter.command_group("rss", alias={"RSS"})
@@ -1155,7 +1422,9 @@ class RssPlugin(Star):
         pass
 
     @rss.command("add-url")
-    async def add_url_command(self, event: AstrMessageEvent, url: str, interval_minutes: int = 0):
+    async def add_url_command(
+        self, event: AstrMessageEvent, url: str, interval_minutes: int = 0
+    ):
         """直接通过 Feed URL 添加订阅。"""
         try:
             info = await self._add_url(
@@ -1167,12 +1436,16 @@ class RssPlugin(Star):
         except Exception as e:
             yield event.plain_result(f"添加失败: {e}")
             return
-        yield event.plain_result(f"添加成功。频道信息：\n标题: {info['title']}\n描述: {info['description']}")
+        yield event.plain_result(
+            f"添加成功。频道信息：\n标题: {info['title']}\n描述: {info['description']}"
+        )
 
     @rss.command("list")
     async def list_command(self, event: AstrMessageEvent):
         """列出当前所有订阅的 RSS 频道。"""
-        yield event.plain_result(self._format_subscription_list(event.unified_msg_origin))
+        yield event.plain_result(
+            self._format_subscription_list(event.unified_msg_origin)
+        )
 
     @rss.command("remove")
     async def remove_command(self, event: AstrMessageEvent, idx: int):
@@ -1182,20 +1455,28 @@ class RssPlugin(Star):
             yield event.plain_result("索引越界，请使用 /rss list 查看已经添加的订阅")
             return
         url = subs_urls[idx]
-        self.data_handler.data[url].get("subscribers", {}).pop(event.unified_msg_origin, None)
+        self.data_handler.data[url].get("subscribers", {}).pop(
+            event.unified_msg_origin, None
+        )
         self.data_handler.save_data()
         self._fresh_asyncIOScheduler()
         yield event.plain_result("删除成功")
 
     @rss.command("get")
-    async def get_command(self, event: AstrMessageEvent, idx: int, mode: str = "latest", limit: int = 1):
+    async def get_command(
+        self, event: AstrMessageEvent, idx: int, mode: str = "latest", limit: int = 1
+    ):
         """获取指定订阅内容；mode=latest/new。"""
         subs_urls = self.data_handler.get_subs_channel_url(event.unified_msg_origin)
         if idx < 0 or idx >= len(subs_urls):
             yield event.plain_result("索引越界，请使用 /rss list 查看已经添加的订阅")
             return
         url = subs_urls[idx]
-        sub = self.data_handler.data[url].get("subscribers", {}).get(event.unified_msg_origin, {})
+        sub = (
+            self.data_handler.data[url]
+            .get("subscribers", {})
+            .get(event.unified_msg_origin, {})
+        )
         rss_items = await self.poll_rss(
             url,
             num=limit,
@@ -1212,7 +1493,12 @@ class RssPlugin(Star):
             yield event.plain_result("没有订阅内容")
             return
         parsed = self._parse_session_id(event.unified_msg_origin)
-        if parsed and parsed[0] == "aiocqhttp" and self.is_compose and len(rss_items) > 1:
+        if (
+            parsed
+            and parsed[0] == "aiocqhttp"
+            and self.is_compose
+            and len(rss_items) > 1
+        ):
             nodes = []
             for item in rss_items:
                 nodes.append(
@@ -1225,10 +1511,14 @@ class RssPlugin(Star):
             yield event.chain_result(nodes).use_t2i(self.t2i)
             return
         for item in rss_items:
-            yield event.chain_result(await self._get_chain_components(item)).use_t2i(self.t2i)
+            yield event.chain_result(await self._get_chain_components(item)).use_t2i(
+                self.t2i
+            )
 
     @filter.llm_tool(name="rss_subscribe_feed")
-    async def rss_subscribe_feed(self, event: AstrMessageEvent, feed_url: str = "", interval_minutes: int = 0) -> dict:
+    async def rss_subscribe_feed(
+        self, event: AstrMessageEvent, feed_url: str = "", interval_minutes: int = 0
+    ) -> dict:
         """订阅一个 RSS/Atom/JSON Feed，并按间隔自动拉取更新。
 
         Args:
@@ -1244,24 +1534,49 @@ class RssPlugin(Star):
                 event,
                 subscriber_kind="llm",
             )
-            return {"status": "success", "message": "订阅已添加", "data": {"title": info["title"], "description": info["description"], "interval_minutes": interval_minutes or self.default_interval_minutes}}
+            return {
+                "status": "success",
+                "message": "订阅已添加",
+                "data": {
+                    "title": info["title"],
+                    "description": info["description"],
+                    "interval_minutes": interval_minutes
+                    or self.default_interval_minutes,
+                },
+            }
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
     @filter.llm_tool(name="rss_list_subscriptions")
     async def rss_list_subscriptions(self, event: AstrMessageEvent) -> dict:
-        """列出当前会话已订阅的 RSS 源。
-        """
+        """列出当前会话已订阅的 RSS 源。"""
         user = event.unified_msg_origin
         items = []
         for idx, url in enumerate(self.data_handler.get_subs_channel_url(user)):
             feed = self.data_handler.data[url]
             sub = feed.get("subscribers", {}).get(user, {})
-            items.append({"index": idx, "url": url, "title": feed.get("info", {}).get("title", "未知频道"), "description": feed.get("info", {}).get("description", ""), "interval_minutes": sub.get("interval_minutes", self.default_interval_minutes), "last_update": sub.get("last_update", 0)})
-        return {"status": "success", "message": f"共 {len(items)} 个订阅", "data": {"subscriptions": items}}
+            items.append(
+                {
+                    "index": idx,
+                    "url": url,
+                    "title": feed.get("info", {}).get("title", "未知频道"),
+                    "description": feed.get("info", {}).get("description", ""),
+                    "interval_minutes": sub.get(
+                        "interval_minutes", self.default_interval_minutes
+                    ),
+                    "last_update": sub.get("last_update", 0),
+                }
+            )
+        return {
+            "status": "success",
+            "message": f"共 {len(items)} 个订阅",
+            "data": {"subscriptions": items},
+        }
 
     @filter.llm_tool(name="rss_remove_subscription")
-    async def rss_remove_subscription(self, event: AstrMessageEvent, index: int = -1, feed_url: str = "") -> dict:
+    async def rss_remove_subscription(
+        self, event: AstrMessageEvent, index: int = -1, feed_url: str = ""
+    ) -> dict:
         """删除当前会话的 RSS 订阅。
 
         Args:
@@ -1278,11 +1593,20 @@ class RssPlugin(Star):
         elif 0 <= index < len(subs):
             target_url = subs[index]
         else:
-            return {"status": "error", "message": f"index {index} 超出订阅列表范围（共 {len(subs)} 个订阅），请先调用 rss_list_subscriptions 确认索引。"}
-        self.data_handler.data.get(target_url, {}).get("subscribers", {}).pop(user, None)
+            return {
+                "status": "error",
+                "message": f"index {index} 超出订阅列表范围（共 {len(subs)} 个订阅），请先调用 rss_list_subscriptions 确认索引。",
+            }
+        self.data_handler.data.get(target_url, {}).get("subscribers", {}).pop(
+            user, None
+        )
         self.data_handler.save_data()
         self._fresh_asyncIOScheduler()
-        return {"status": "success", "message": "订阅已删除", "data": {"url": target_url}}
+        return {
+            "status": "success",
+            "message": "订阅已删除",
+            "data": {"url": target_url},
+        }
 
     @filter.llm_tool(name="rss_fetch_items")
     async def rss_fetch_items(
@@ -1312,10 +1636,19 @@ class RssPlugin(Star):
         try:
             user = event.unified_msg_origin
             subs = self.data_handler.get_subs_channel_url(user)
-            url = self._normalize_url(feed_url) if feed_url else (subs[index] if 0 <= index < len(subs) else "")
+            url = (
+                self._normalize_url(feed_url)
+                if feed_url
+                else (subs[index] if 0 <= index < len(subs) else "")
+            )
             if not url:
-                return {"status": "error", "message": f"index {index} 超出订阅列表范围（共 {len(subs)} 个订阅），请先调用 rss_list_subscriptions 确认索引。"}
-            sub = self.data_handler.data.get(url, {}).get("subscribers", {}).get(user, {})
+                return {
+                    "status": "error",
+                    "message": f"index {index} 超出订阅列表范围（共 {len(subs)} 个订阅），请先调用 rss_list_subscriptions 确认索引。",
+                }
+            sub = (
+                self.data_handler.data.get(url, {}).get("subscribers", {}).get(user, {})
+            )
             rss_items = await self.poll_rss(
                 url,
                 num=limit,
@@ -1328,7 +1661,11 @@ class RssPlugin(Star):
             if poll_error:
                 return {"status": "error", "message": poll_error, "data": {"url": url}}
             await self._ensure_item_image_captions(rss_items)
-            if mark_as_seen and url in self.data_handler.data and user in self.data_handler.data[url].get("subscribers", {}):
+            if (
+                mark_as_seen
+                and url in self.data_handler.data
+                and user in self.data_handler.data[url].get("subscribers", {})
+            ):
                 self._mark_items_seen(url, user, rss_items)
                 self.data_handler.save_data()
             return {
@@ -1382,7 +1719,9 @@ class RssPlugin(Star):
             results.append(
                 {
                     "url": url,
-                    "title": self.data_handler.data[url].get("info", {}).get("title", "未知频道"),
+                    "title": self.data_handler.data[url]
+                    .get("info", {})
+                    .get("title", "未知频道"),
                     "error": poll_error or "",
                     "items": self._items_to_llm_payload(
                         items,
@@ -1392,7 +1731,11 @@ class RssPlugin(Star):
             )
         if mark_as_seen:
             self.data_handler.save_data()
-        return {"status": "success", "message": "订阅拉取完成", "data": {"feeds": results}}
+        return {
+            "status": "success",
+            "message": "订阅拉取完成",
+            "data": {"feeds": results},
+        }
 
     @filter.llm_tool(name="rss_update_settings")
     async def rss_update_settings(
@@ -1434,5 +1777,14 @@ class RssPlugin(Star):
         persisted, persist_error = self._save_plugin_config_updates(updates)
         self._fresh_asyncIOScheduler()
         status = "success" if persisted else "warning"
-        message = "RSS 插件配置已更新" if persisted else f"RSS 运行时配置已更新，但持久化失败: {persist_error}"
-        return {"status": status, "message": message, "data": self._get_effective_settings(), "persisted": persisted}
+        message = (
+            "RSS 插件配置已更新"
+            if persisted
+            else f"RSS 运行时配置已更新，但持久化失败: {persist_error}"
+        )
+        return {
+            "status": status,
+            "message": message,
+            "data": self._get_effective_settings(),
+            "persisted": persisted,
+        }
