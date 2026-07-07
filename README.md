@@ -176,7 +176,7 @@ pillow
 
 ### `rss_update_settings`
 
-更新 RSS 插件运行时设置。该设置会写入数据文件 `settings`，插件重启后继续生效。
+更新 RSS 插件自身配置。配置会优先写入 AstrBot 插件配置对象；订阅数据 JSON 不再保存全局配置。
 
 参数：
 
@@ -323,10 +323,10 @@ pillow
 
 ## 数据结构
 
-数据文件默认仍位于：
+订阅数据文件位于 AstrBot 标准插件数据目录：
 
 ```text
-data/astrbot_plugin_rss_data.json
+<AstrBot 数据目录>/plugin_data/astrbot_plugin_rss_for_koko/astrbot_plugin_rss_data.json
 ```
 
 新版结构大致如下：
@@ -334,10 +334,6 @@ data/astrbot_plugin_rss_data.json
 ```json
 {
   "rsshub_endpoints": [],
-  "settings": {
-    "proxy_url": "http://127.0.0.1:7890",
-    "default_interval_minutes": 60
-  },
   "https://example.com/feed.xml": {
     "info": {
       "title": "Example Feed",

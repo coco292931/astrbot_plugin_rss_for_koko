@@ -13,11 +13,10 @@ class DataHandler:
 
     RESERVED_KEYS = {"rsshub_endpoints", "settings"}
 
-    def __init__(self, config_path="data/astrbot_plugin_rss_data.json", default_config=None):
+    def __init__(self, config_path, default_config=None):
         self.config_path = config_path
         self.default_config = default_config or {
             "rsshub_endpoints": [],
-            "settings": {},
         }
         self.data = self.load_data()
 
@@ -26,8 +25,28 @@ class DataHandler:
         if not isinstance(data, dict):
             data = {}
         data.setdefault("rsshub_endpoints", [])
-        data.setdefault("settings", {})
+        data.pop("settings", None)
         return data
+
+    def _ordered_data(self) -> dict:
+        """按可读顺序保存数据：全局保留字段在前，feed 内 info 在 subscribers 前。"""
+        ordered: dict = {}
+        ordered["rsshub_endpoints"] = self.data.get("rsshub_endpoints", [])
+        for url, info in self.data.items():
+            if url in self.RESERVED_KEYS:
+                continue
+            if not isinstance(info, dict):
+                ordered[url] = info
+                continue
+            feed_ordered = {}
+            for key in ("info", "subscribers", "state"):
+                if key in info:
+                    feed_ordered[key] = info[key]
+            for key, value in info.items():
+                if key not in feed_ordered:
+                    feed_ordered[key] = value
+            ordered[url] = feed_ordered
+        return ordered
 
     def get_subs_channel_url(self, user_id) -> list:
         """获取用户订阅的频道 url 列表。"""
@@ -61,7 +80,7 @@ class DataHandler:
         if data_dir:
             os.makedirs(data_dir, exist_ok=True)
         with open(self.config_path, "w", encoding="utf-8") as f:
-            json.dump(self.data, f, indent=2, ensure_ascii=False)
+            json.dump(self._ordered_data(), f, indent=2, ensure_ascii=False)
 
     def parse_channel_text_info(self, text):
         """解析 RSS/Atom 频道信息。"""

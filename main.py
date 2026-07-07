@@ -5,6 +5,7 @@ import hashlib
 import ipaddress
 import json
 import logging
+import os
 import re
 import socket
 import time
@@ -22,7 +23,8 @@ from lxml import etree
 from astrbot.api import AstrBotConfig
 from astrbot.api.event import AstrMessageEvent, MessageChain, MessageEventResult, filter
 import astrbot.api.message_components as Comp
-from astrbot.api.star import Context, Star, register
+from astrbot.api.star import Context, Star, StarTools, register
+from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
 try:
     from astrbot.core.agent.message import AssistantMessageSegment, TextPart, ThinkPart, UserMessageSegment
@@ -61,6 +63,9 @@ from .pic_handler import RssImageHandler
 from .rss import RSSItem
 
 
+PLUGIN_NAME = "astrbot_plugin_rss_for_koko"
+
+
 @register(
     "astrbot_plugin_rss_for_koko",
     "Soulter / coco",
@@ -81,7 +86,10 @@ class RssPlugin(Star):
         self.logger = logging.getLogger("astrbot")
         self.context = context
         self.config = config
-        self.data_handler = DataHandler()
+        self.data_dir = self._resolve_data_dir()
+        self.data_handler = DataHandler(
+            os.path.join(self.data_dir, "astrbot_plugin_rss_data.json")
+        )
 
         self.title_max_length = self._cfg_int("title_max_length", 80)
         self.description_max_length = self._cfg_int("description_max_length", 800)
@@ -111,21 +119,6 @@ class RssPlugin(Star):
         self.proxy_timeout_fallback = bool(config.get("proxy_timeout_fallback", True))
         self.allow_private_network = bool(config.get("allow_private_network", False))
 
-        runtime_settings = self.data_handler.data.get("settings", {})
-        if isinstance(runtime_settings, dict):
-            self.proxy_url = str(runtime_settings.get("proxy_url", self.proxy_url) or "").strip()
-            for attr in (
-                "default_interval_minutes",
-                "max_items_per_poll",
-                "max_item_chars",
-                "max_total_chars",
-            ):
-                if runtime_settings.get(attr):
-                    try:
-                        setattr(self, attr, int(runtime_settings[attr]))
-                    except (TypeError, ValueError):
-                        pass
-
         self.t2i = bool(config.get("t2i", False))
         self.is_hide_url = bool(config.get("is_hide_url", False))
         pic_config = config.get("pic_config") or {}
@@ -140,6 +133,15 @@ class RssPlugin(Star):
         self._migrate_existing_data()
         self._fresh_asyncIOScheduler()
 
+    def _resolve_data_dir(self) -> str:
+        """获取标准插件数据目录。"""
+        try:
+            data_dir = StarTools.get_data_dir(PLUGIN_NAME)
+        except RuntimeError:
+            data_dir = os.path.join(get_astrbot_data_path(), "plugin_data", PLUGIN_NAME)
+        os.makedirs(data_dir, exist_ok=True)
+        return data_dir
+
     async def terminate(self) -> None:
         """插件卸载时关闭 RSS 调度器。"""
         if self.scheduler and self.scheduler.running:
@@ -151,6 +153,33 @@ class RssPlugin(Star):
             return int(self.config.get(key, default))
         except (TypeError, ValueError):
             return default
+
+    def _get_effective_settings(self) -> dict:
+        """返回当前插件配置基准下的生效配置。"""
+        return {
+            "proxy_url": self.proxy_url,
+            "default_interval_minutes": self.default_interval_minutes,
+            "max_items_per_poll": self.max_items_per_poll,
+            "max_item_chars": self.max_item_chars,
+            "max_total_chars": self.max_total_chars,
+            "image_caption_timeout_seconds": self.image_caption_timeout_seconds,
+        }
+
+    def _save_plugin_config_updates(self, updates: dict) -> tuple[bool, str]:
+        """写入 AstrBot 插件配置；不再写入订阅数据 JSON 的全局 settings。"""
+        if not updates:
+            return True, ""
+        try:
+            for key, value in updates.items():
+                self.config[key] = value
+            save_config = getattr(self.config, "save_config", None)
+            if callable(save_config):
+                save_config()
+            else:
+                return False, "当前配置对象不支持 save_config()，已仅在本次运行中生效"
+            return True, ""
+        except Exception as e:
+            return False, str(e)
 
     def _migrate_existing_data(self) -> None:
         """将旧版 cron 订阅迁移为 interval 订阅结构。"""
@@ -347,8 +376,10 @@ class RssPlugin(Star):
         only_new: bool = True,
     ) -> list[RSSItem]:
         """从站点拉取并标准化 RSS/Atom/JSON Feed。"""
+        self._last_poll_errors.pop(url, None)
         text = await self.parse_channel_info(url)
         if text is None:
+            self._last_poll_errors[url] = "无法获取 Feed 内容"
             self.logger.error(f"rss: 无法解析站点 {url} 的 RSS 信息")
             return []
         limit = self._normalize_limit(num)
@@ -358,6 +389,7 @@ class RssPlugin(Star):
             else:
                 items = self._parse_xml_feed(text, url)
         except Exception as e:
+            self._last_poll_errors[url] = f"解析 Feed 失败: {e}"
             self.logger.error(f"rss: 解析 Feed 失败 {url}: {e}")
             self.logger.debug(traceback.format_exc())
             return []
@@ -639,7 +671,11 @@ class RssPlugin(Star):
             only_new=True,
         )
         if not rss_items:
-            self.logger.info(f"RSS 定时任务 {url} 无消息更新 - {user}")
+            poll_error = self._last_poll_errors.get(url)
+            if poll_error:
+                self.logger.warning(f"RSS 定时任务 {url} 拉取失败 - {user}: {poll_error}")
+            else:
+                self.logger.debug(f"RSS 定时任务 {url} 无消息更新 - {user}")
             return
 
         delivered = False
@@ -1041,22 +1077,17 @@ class RssPlugin(Star):
         if text is None:
             raise ValueError("无法获取 Feed 内容")
         title, desc = self.data_handler.parse_channel_text_info(text)
-        latest_items = await self.poll_rss(url, num=self.max_items_per_poll, only_new=False)
         normalized_interval = self._normalize_interval_minutes(interval_minutes)
         sub_payload = self._new_subscription_payload(
             normalized_interval,
             subscriber_kind=subscriber_kind,
         )
-        sub_payload["seen_ids"] = [item.identity() for item in latest_items if item.identity()][: self.history_seen_limit]
-        if latest_items:
-            sub_payload["last_update"] = max(item.pubDate_timestamp for item in latest_items)
-            sub_payload["latest_link"] = latest_items[0].link
 
         if url not in self.data_handler.data:
             self.data_handler.data[url] = {
-                "subscribers": {},
                 "info": {"title": title, "description": desc},
-                "state": {"seen_ids": sub_payload["seen_ids"], "last_update": sub_payload["last_update"], "latest_link": sub_payload["latest_link"]},
+                "subscribers": {},
+                "state": {},
             }
         else:
             self.data_handler.data[url].setdefault("info", {"title": title, "description": desc})
@@ -1066,6 +1097,23 @@ class RssPlugin(Star):
         self.data_handler.data[url]["subscribers"][user] = sub_payload
         self.data_handler.save_data()
         self._fresh_asyncIOScheduler()
+
+        try:
+            latest_items = self._parse_json_feed(text, url) if self._looks_like_json(text) else self._parse_xml_feed(text, url)
+            latest_items = latest_items[: self._normalize_limit(self.max_items_per_poll)]
+            if latest_items and user in self.data_handler.data[url].get("subscribers", {}):
+                sub_payload["seen_ids"] = [
+                    item.identity() for item in latest_items if item.identity()
+                ][: self.history_seen_limit]
+                sub_payload["last_update"] = max(item.pubDate_timestamp for item in latest_items)
+                sub_payload["latest_link"] = latest_items[0].link
+                state = self.data_handler.data[url].setdefault("state", {})
+                state["seen_ids"] = sub_payload["seen_ids"]
+                state["last_update"] = sub_payload["last_update"]
+                state["latest_link"] = sub_payload["latest_link"]
+                self.data_handler.save_data()
+        except Exception as e:
+            self.logger.warning(f"rss: 初始化订阅已读状态失败，但订阅已保存: {e}")
         return self.data_handler.data[url]["info"]
 
     async def _get_chain_components(self, item: RSSItem):
@@ -1151,6 +1199,10 @@ class RssPlugin(Star):
             only_new=(mode == "new"),
         )
         if not rss_items:
+            poll_error = self._last_poll_errors.get(url)
+            if poll_error:
+                yield event.plain_result(f"拉取失败: {poll_error}")
+                return
             yield event.plain_result("没有订阅内容")
             return
         parsed = self._parse_session_id(event.unified_msg_origin)
@@ -1239,6 +1291,9 @@ class RssPlugin(Star):
                 seen_ids=sub.get("seen_ids", []),
                 only_new=only_new,
             )
+            poll_error = self._last_poll_errors.get(url)
+            if poll_error:
+                return {"status": "error", "message": poll_error, "data": {"url": url}}
             await self._ensure_item_image_captions(rss_items)
             if mark_as_seen and url in self.data_handler.data and user in self.data_handler.data[url].get("subscribers", {}):
                 self._mark_items_seen(url, user, rss_items)
@@ -1280,6 +1335,7 @@ class RssPlugin(Star):
                 seen_ids=sub.get("seen_ids", []),
                 only_new=only_new,
             )
+            poll_error = self._last_poll_errors.get(url)
             await self._ensure_item_image_captions(items)
             if mark_as_seen:
                 self._mark_items_seen(url, user, items)
@@ -1287,6 +1343,7 @@ class RssPlugin(Star):
                 {
                     "url": url,
                     "title": self.data_handler.data[url].get("info", {}).get("title", "未知频道"),
+                    "error": poll_error or "",
                     "items": self._items_to_llm_payload(
                         items,
                         return_full_content=return_full_content,
@@ -1308,14 +1365,14 @@ class RssPlugin(Star):
         max_item_chars: int = 0,
         max_total_chars: int = 0,
     ) -> dict:
-        """更新 LLM 使用 RSS 所需的运行时设置。"""
-        settings = self.data_handler.data.setdefault("settings", {})
+        """更新 LLM 使用 RSS 所需的插件配置。"""
+        updates = {}
         if clear_proxy:
             self.proxy_url = ""
-            settings["proxy_url"] = ""
+            updates["proxy_url"] = ""
         elif proxy_url.strip():
             self.proxy_url = proxy_url.strip()
-            settings["proxy_url"] = self.proxy_url
+            updates["proxy_url"] = self.proxy_url
         for attr, value in (
             ("default_interval_minutes", default_interval_minutes),
             ("max_items_per_poll", max_items_per_poll),
@@ -1324,7 +1381,9 @@ class RssPlugin(Star):
         ):
             if value and value > 0:
                 setattr(self, attr, int(value))
-                settings[attr] = int(value)
-        self.data_handler.save_data()
+                updates[attr] = int(value)
+        persisted, persist_error = self._save_plugin_config_updates(updates)
         self._fresh_asyncIOScheduler()
-        return {"status": "success", "message": "RSS 设置已更新", "data": settings}
+        status = "success" if persisted else "warning"
+        message = "RSS 插件配置已更新" if persisted else f"RSS 运行时配置已更新，但持久化失败: {persist_error}"
+        return {"status": status, "message": message, "data": self._get_effective_settings(), "persisted": persisted}
