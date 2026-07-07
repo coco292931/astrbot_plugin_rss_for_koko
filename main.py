@@ -761,14 +761,22 @@ class RssPlugin(Star):
             .replace("{{rss_items}}", items_json)
         )
 
-    def _items_to_llm_payload(self, items: list[RSSItem], include_full_content: bool = True) -> list[dict]:
+    def _items_to_llm_payload(
+        self,
+        items: list[RSSItem],
+        include_full_content: bool = True,
+        return_full_content: bool = False,
+    ) -> list[dict]:
         """将条目转成受长度限制的 LLM payload。"""
         payload = []
         total = 0
         for item in items:
-            data = item.to_dict(include_full_content=include_full_content, max_chars=self.max_item_chars)
+            data = item.to_dict(
+                include_full_content=include_full_content or return_full_content,
+                max_chars=0 if return_full_content else self.max_item_chars,
+            )
             serialized = json.dumps(data, ensure_ascii=False)
-            if self.max_total_chars > 0 and total + len(serialized) > self.max_total_chars:
+            if not return_full_content and self.max_total_chars > 0 and total + len(serialized) > self.max_total_chars:
                 remaining = max(0, self.max_total_chars - total)
                 data["content"] = str(data.get("content", ""))[:remaining].rstrip() + "..."
                 payload.append(data)
@@ -1197,9 +1205,10 @@ class RssPlugin(Star):
         limit: int = 5,
         only_new: bool = False,
         include_full_content: bool = True,
+        return_full_content: bool = False,
         mark_as_seen: bool = False,
     ) -> dict:
-        """拉取 RSS/Atom/JSON Feed 条目并返回结构化内容给 LLM。"""
+        """拉取 RSS/Atom/JSON Feed 条目并返回结构化内容给 LLM。return_full_content=true 时绕过字数截断返回本次拉取全文。"""
         try:
             user = event.unified_msg_origin
             subs = self.data_handler.get_subs_channel_url(user)
@@ -1227,6 +1236,7 @@ class RssPlugin(Star):
                     "items": self._items_to_llm_payload(
                         rss_items,
                         include_full_content=include_full_content,
+                        return_full_content=return_full_content,
                     ),
                 },
             }
@@ -1237,11 +1247,12 @@ class RssPlugin(Star):
     async def rss_poll_subscriptions(
         self,
         event: AstrMessageEvent,
-        only_new: bool = True,
+        only_new: bool = False,
         limit_per_feed: int = 5,
+        return_full_content: bool = False,
         mark_as_seen: bool = False,
     ) -> dict:
-        """拉取当前会话所有订阅源的内容并直接返回给 LLM。"""
+        """拉取当前会话所有订阅源的内容并直接返回给 LLM。return_full_content=true 时绕过字数截断返回本次拉取全文。"""
         user = event.unified_msg_origin
         results = []
         for url in self.data_handler.get_subs_channel_url(user):
@@ -1261,7 +1272,10 @@ class RssPlugin(Star):
                 {
                     "url": url,
                     "title": self.data_handler.data[url].get("info", {}).get("title", "未知频道"),
-                    "items": self._items_to_llm_payload(items),
+                    "items": self._items_to_llm_payload(
+                        items,
+                        return_full_content=return_full_content,
+                    ),
                 }
             )
         if mark_as_seen:

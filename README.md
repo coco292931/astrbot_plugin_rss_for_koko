@@ -158,16 +158,18 @@ pillow
 - `limit`：最多返回条数。
 - `only_new`：是否只返回新增条目。
 - `include_full_content`：是否尽量返回正文内容。
+- `return_full_content`：是否全量返回本次拉取内容。设为 `true` 时会绕过 `max_item_chars` 和 `max_total_chars`，适合需要完整正文的场景。
 - `mark_as_seen`：是否把本次返回内容标记为已读。
 
 ### `rss_poll_subscriptions`
 
-拉取当前会话所有订阅源。
+拉取当前会话所有订阅源。默认返回每个订阅源的最新内容；如果只想查看尚未读过的更新，请显式传入 `only_new=true`。
 
 参数：
 
-- `only_new`：是否只返回新增内容。
+- `only_new`：是否只返回新增内容，默认 `false`。
 - `limit_per_feed`：每个 Feed 最多返回条数。
+- `return_full_content`：是否全量返回本次拉取内容。设为 `true` 时会绕过 `max_item_chars` 和 `max_total_chars`。
 - `mark_as_seen`：是否把返回条目标记为已读。
 
 适合 LLM 主动问：“我有哪些 RSS 更新？”时调用。
