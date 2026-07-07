@@ -25,6 +25,12 @@
         "hint": "可用占位符：{{session_id}}、{{subscriber_kind}}、{{feed_title}}、{{feed_url}}、{{current_time}}、{{item_count}}、{{rss_items}}。",
         "default": "[系统任务：RSS 订阅更新]\n订阅者会话：{{session_id}}\n订阅来源：{{subscriber_kind}}（llm 表示由工具订阅，user 表示由用户命令订阅）\n订阅源：{{feed_title}}\n订阅地址：{{feed_url}}\n当前时间：{{current_time}}\n更新数量：{{item_count}}\n\n以下是插件解析后的 RSS 更新内容（JSON）。请结合你的人格、当前会话上下文和这些 RSS 更新，自行判断重点，并用自然方式告诉用户。不要逐字段机械复述；如果内容不值得提醒，可以简短说明。多媒体内容不要假装已经观看，遇到 [音频]、[视频] 等占位符只说明有对应附件或链接。\n\n{{rss_items}}"
     },
+    "image_caption_prompt": {
+        "description": "RSS 图片/GIF 转述提示词",
+        "type": "text",
+        "hint": "调用 astrbot_plugin_toolbox_for_koko 的 tool_image_caption 时使用。支持 {image_type}、{index}、{total}、{source} 占位符；留空使用内置默认提示词。",
+        "default": "请用中文简洁转述这张 RSS 内容中的 {image_type}。只描述图片实际内容，不要输出图片占位符。"
+    },
     "preserve_reasoning_in_history": {
         "description": "落盘时保留 LLM 思考内容",
         "type": "bool",

@@ -19,6 +19,7 @@ class RSSItem:
     content: str = ""
     tags: list[str] = field(default_factory=list)
     media_urls: list[str] = field(default_factory=list)
+    image_captions: list[dict[str, str]] = field(default_factory=list)
     source_url: str = ""
     content_hash: str = ""
 
@@ -49,6 +50,7 @@ class RSSItem:
             "content": body,
             "tags": self.tags,
             "images": self.pic_urls,
+            "image_captions": self.image_captions,
             "media": self.media_urls,
         }
 

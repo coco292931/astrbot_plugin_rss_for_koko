@@ -72,6 +72,8 @@ class RssPlugin(Star):
     """RSS 订阅插件：以 LLM 为主、用户为辅处理订阅更新。"""
 
     USER_AGENT = "AstrBot-RSS-LLM/1.2 (+https://github.com/coco292931/astrbot_plugin_rss)"
+    IMAGE_CAPTION_PROMPT = "请用中文简洁转述这张 RSS 内容中的 {image_type}。只描述图片实际内容，不要输出图片占位符。"
+    IMAGE_CAPTION_PROMPT = '' #故意的
 
     def __init__(self, context: Context, config: AstrBotConfig) -> None:
         super().__init__(context)
@@ -93,6 +95,10 @@ class RssPlugin(Star):
 
         self.llm_mode_enabled = bool(config.get("llm_mode_enabled", True))
         self.llm_prompt_template = config.get("llm_prompt_template") or ""
+        self.image_caption_prompt = (
+            str(config.get("image_caption_prompt", "") or "").strip()
+            or self.IMAGE_CAPTION_PROMPT
+        )
         self.preserve_reasoning_in_history = bool(config.get("preserve_reasoning_in_history", True))
         self.send_user_fallback_on_llm_error = bool(config.get("send_user_fallback_on_llm_error", True))
 
@@ -413,6 +419,8 @@ class RssPlugin(Star):
         author = self._node_text(node, ["author", "creator", "name"])
         tags = [str(x).strip() for x in node.xpath("./*[local-name()='category']/text()") if str(x).strip()]
         pic_urls = self.data_handler.strip_html_pic(raw_content or raw_description, feed_url)
+        pic_urls.extend(self._extract_image_links(node, feed_url))
+        pic_urls = list(dict.fromkeys(pic_urls))
         media_urls = self.data_handler.strip_html_media(raw_content or raw_description, feed_url)
         media_urls.extend(self._extract_media_links(node, feed_url))
         content_hash = self._content_hash(title, link, content or description)
@@ -431,6 +439,7 @@ class RssPlugin(Star):
             content=content,
             tags=tags,
             media_urls=media_urls,
+            image_captions=[],
             source_url=feed_url,
             content_hash=content_hash,
         )
@@ -478,6 +487,24 @@ class RssPlugin(Star):
             media_urls.append(f"[{label}] {urljoin(feed_url, media_url)}")
         return media_urls
 
+    def _extract_image_links(self, node, feed_url: str) -> list[str]:
+        """提取 enclosure/media:content/media:thumbnail 中的图片/GIF 链接。"""
+        image_urls = []
+        for media_node in node.xpath("./*[local-name()='enclosure' or local-name()='content' or local-name()='thumbnail']"):
+            media_url = media_node.get("url") or media_node.get("href")
+            if not media_url:
+                continue
+            media_type = (media_node.get("type") or "").lower()
+            tag_name = etree.QName(media_node).localname.lower()
+            is_image = (
+                tag_name == "thumbnail"
+                or media_type.startswith("image")
+                or bool(re.search(r"\.(?:png|jpe?g|gif|webp)(?:$|[?#])", media_url, re.I))
+            )
+            if is_image:
+                image_urls.append(urljoin(feed_url, media_url))
+        return image_urls
+
     def _parse_json_feed(self, text: bytes, feed_url: str) -> list[RSSItem]:
         """解析 JSON Feed。"""
         payload = json.loads(text.decode("utf-8-sig"))
@@ -500,13 +527,17 @@ class RssPlugin(Star):
             if isinstance(item.get("author"), dict):
                 author = str(item["author"].get("name") or "")
             attachments = item.get("attachments") if isinstance(item.get("attachments"), list) else []
+            pic_urls = self.data_handler.strip_html_pic(raw_content, feed_url)
             media_urls = []
             for attachment in attachments:
                 if not isinstance(attachment, dict):
                     continue
                 media_type = str(attachment.get("mime_type") or "").lower()
                 media_url = attachment.get("url")
-                if not media_url or media_type.startswith("image"):
+                if not media_url:
+                    continue
+                if media_type.startswith("image"):
+                    pic_urls.append(urljoin(feed_url, media_url))
                     continue
                 label = "音频" if media_type.startswith("audio") else "视频" if media_type.startswith("video") else "媒体"
                 media_urls.append(f"[{label}] {urljoin(feed_url, media_url)}")
@@ -519,12 +550,13 @@ class RssPlugin(Star):
                     self._truncate_display(description, self.description_max_length),
                     pub_date,
                     self._parse_datetime_to_timestamp(pub_date),
-                    self.data_handler.strip_html_pic(raw_content, feed_url),
+                    list(dict.fromkeys(pic_urls)),
                     guid=guid,
                     author=author,
                     content=content,
                     tags=tags,
                     media_urls=media_urls,
+                    image_captions=[],
                     source_url=feed_url,
                     content_hash=self._content_hash(title, link, content or description),
                 )
@@ -631,6 +663,7 @@ class RssPlugin(Star):
 
     async def _send_items_via_llm(self, session_id: str, url: str, items: list[RSSItem]) -> bool:
         """将 RSS 更新作为任务交给 LLM，并发送 LLM 最终回复。"""
+        await self._ensure_item_image_captions(items)
         prompt = self._build_llm_prompt(session_id, url, items)
         try:
             provider_id = await self.context.get_current_chat_provider_id(session_id)
@@ -743,6 +776,110 @@ class RssPlugin(Star):
             payload.append(data)
             total += len(serialized)
         return payload
+
+    def _get_toolbox_plugin_instance(self):
+        """参考 toolbox 跨插件查找方式，定位 astrbot_plugin_toolbox_for_koko 实例。"""
+        candidate_names = [
+            "astrbot_plugin_toolbox_for_koko",
+            "toolbox_for_koko",
+            "toolbox",
+            "多功能工具箱",
+        ]
+        for plugin_name in candidate_names:
+            try:
+                meta = self.context.get_registered_star(plugin_name)
+            except Exception:
+                meta = None
+            if meta and getattr(meta, "star_cls", None):
+                return meta.star_cls
+
+        try:
+            all_stars = self.context.get_all_stars()
+        except Exception:
+            all_stars = []
+
+        for meta in all_stars:
+            module_path = str(getattr(meta, "module_path", "") or "").lower()
+            star_name = str(getattr(meta, "name", "") or "").lower()
+            if "toolbox_for_koko" in module_path or "toolbox_for_koko" in star_name:
+                star_cls = getattr(meta, "star_cls", None)
+                if star_cls:
+                    return star_cls
+        return None
+
+    async def _ensure_item_image_captions(self, items: list[RSSItem]) -> None:
+        """遇到图片/GIF 时调用 toolbox 的 image_caption 转述，并保留图片链接。"""
+        for item in items:
+            if not item.pic_urls or item.image_captions:
+                continue
+            captions = await self._caption_image_urls(item.pic_urls)
+            if captions:
+                item.image_captions = captions
+
+    async def _caption_image_urls(self, image_urls: list[str]) -> list[dict[str, str]]:
+        """跨插件调用 toolbox tool_image_caption，返回 url + caption 映射。"""
+        urls = list(dict.fromkeys([str(url or "").strip() for url in image_urls if str(url or "").strip()]))
+        if not urls:
+            return []
+
+        toolbox = self._get_toolbox_plugin_instance()
+        if not toolbox:
+            self.logger.debug("rss: 未找到 toolbox 插件实例，跳过图片转述")
+            return []
+
+        result = None
+        try:
+            tool_image_caption = getattr(toolbox, "tool_image_caption", None)
+            if callable(tool_image_caption):
+                result = await tool_image_caption(
+                    None,
+                    urls=urls,
+                    use_event_images=False,
+                    prompt=self.image_caption_prompt,
+                )
+            else:
+                run_koko_tool = getattr(toolbox, "run_koko_tool", None)
+                if callable(run_koko_tool):
+                    result = await run_koko_tool(
+                        None,
+                        tool_name="tool_image_caption",
+                        args={
+                            "urls": urls,
+                            "use_event_images": False,
+                            "prompt": self.image_caption_prompt,
+                        },
+                    )
+        except Exception as e:
+            self.logger.debug(f"rss: 调用 toolbox image_caption 失败: {e}")
+            return []
+
+        message = ""
+        if isinstance(result, dict):
+            if str(result.get("status", "success") or "success").lower() == "error":
+                return []
+            message = str(result.get("message") or "")
+        elif isinstance(result, str):
+            message = result
+        return self._parse_image_caption_message(urls, message)
+
+    def _parse_image_caption_message(self, image_urls: list[str], message: str) -> list[dict[str, str]]:
+        """解析 toolbox 转述结果，省略 [图片]/[GIF] 占位符但保留链接。"""
+        lines = [line.strip() for line in str(message or "").splitlines() if line.strip()]
+        captions = []
+        for idx, url in enumerate(image_urls):
+            line = lines[idx] if idx < len(lines) else ""
+            line = re.sub(r"^\d+[\.、]\s*", "", line).strip()
+            text = ""
+            match = re.match(r"^\[[^\]:：]+[:：]\s*(.*?)\]$", line, re.S)
+            if match:
+                text = match.group(1).strip()
+            elif re.match(r"^\[[^\]:：]+\]$", line):
+                text = ""
+            else:
+                text = line.strip()
+            if text:
+                captions.append({"url": url, "caption": '[图像]'+text})
+        return captions
 
     async def _send_items_plain(self, session_id: str, items: list[RSSItem]) -> bool:
         """辅助模式：不经 LLM，直接发送 RSS 文本。返回是否至少送出一条。"""
@@ -1078,6 +1215,7 @@ class RssPlugin(Star):
                 seen_ids=sub.get("seen_ids", []),
                 only_new=only_new,
             )
+            await self._ensure_item_image_captions(rss_items)
             if mark_as_seen and url in self.data_handler.data and user in self.data_handler.data[url].get("subscribers", {}):
                 self._mark_items_seen(url, user, rss_items)
                 self.data_handler.save_data()
@@ -1116,6 +1254,7 @@ class RssPlugin(Star):
                 seen_ids=sub.get("seen_ids", []),
                 only_new=only_new,
             )
+            await self._ensure_item_image_captions(items)
             if mark_as_seen:
                 self._mark_items_seen(url, user, items)
             results.append(

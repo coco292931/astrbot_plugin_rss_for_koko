@@ -12,7 +12,7 @@
 - **历史去重**：每个订阅会话维护 `seen_ids`，避免重复把同一条 RSS 内容投喂给 LLM。
 - **格式扩展**：支持 RSS / RDF / Atom XML，以及 JSON Feed。
 - **代理支持**：支持全局 `proxy_url`，代理失败后可回退直连。
-- **上下文安全**：音频、视频等多媒体不会直接附加到 LLM 上下文，只以 `[音频]`、`[视频]` 或链接占位。
+- **上下文安全**：图片/GIF 会尽量调用 `astrbot_plugin_toolbox_for_koko` 的 `tool_image_caption` 转述，并保留原图链接；音频、视频等多媒体不会直接附加到 LLM 上下文，只以 `[音频]`、`[视频]` 或链接占位。
 - **轻量发送链路**：保留简化发送逻辑，优先平台会话发送，失败时回退 AstrBot 核心发送。
 
 ## 工作流
@@ -216,6 +216,14 @@ pillow
 - 默认值：`true`
 - 说明：如果模型返回 `reasoning_content`，写入 AstrBot 对话历史时会以 `think` 内容保存。
 
+#### `image_caption_prompt`
+
+- 类型：`text`
+- 默认值：`请用中文简洁转述这张 RSS 内容中的 {image_type}。只描述图片实际内容，不要输出图片占位符。`
+- 说明：RSS 图片/GIF 调用 `astrbot_plugin_toolbox_for_koko` 的 `tool_image_caption` 时使用的提示词。
+- 可用占位符：`{image_type}`、`{index}`、`{total}`、`{source}`。
+- 留空时传空值
+
 #### `send_user_fallback_on_llm_error`
 
 - 类型：`bool`
@@ -351,11 +359,11 @@ data/astrbot_plugin_rss_data.json
 
 ## 多媒体策略
 
-当前不会把音频、视频等多媒体直接放入 LLM 上下文。
+当前不会把音频、视频等多媒体直接放入 LLM 上下文。图片/GIF 会尽量跨插件调用 `toolbox` 的 `tool_image_caption` 做转述。
 
 处理方式：
 
-- 图片：作为链接字段提供，辅助推送模式可按原配置尝试发送图片。
+- 图片/GIF：保留原始链接到 `images` 字段；如果 `astrbot_plugin_toolbox_for_koko` 可用，会额外写入 `image_captions`，格式为 `{url, caption}`。转述失败时只保留链接，不额外写入 `[图片]` / `[GIF]` 占位符。
 - 音频：用 `[音频] <url>` 占位。
 - 视频：用 `[视频] <url>` 占位。
 - 其他附件：用 `[媒体] <url>` 占位。
