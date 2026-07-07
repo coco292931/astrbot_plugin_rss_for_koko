@@ -1226,7 +1226,12 @@ class RssPlugin(Star):
 
     @filter.llm_tool(name="rss_subscribe_feed")
     async def rss_subscribe_feed(self, event: AstrMessageEvent, feed_url: str = "", interval_minutes: int = 0) -> dict:
-        """订阅一个 RSS/Atom/JSON Feed。参数必须包含完整 http/https feed_url；interval_minutes 为自动拉取间隔分钟数，缺省使用全局默认值。订阅后插件会按间隔自动拉取新增内容，并将更新交给 LLM 生成最终回复后发送给当前会话。"""
+        """订阅一个 RSS/Atom/JSON Feed，并按间隔自动拉取更新。
+
+        Args:
+            feed_url(string): 必填。完整 Feed URL，必须以 http:// 或 https:// 开头。例如 https://www.ruanyifeng.com/blog/atom.xml。
+            interval_minutes(number): 可选。自动拉取间隔分钟数；传 0 或不传时使用插件配置 default_interval_minutes。
+        """
         try:
             info = await self._add_url(
                 feed_url,
@@ -1240,7 +1245,8 @@ class RssPlugin(Star):
 
     @filter.llm_tool(name="rss_list_subscriptions")
     async def rss_list_subscriptions(self, event: AstrMessageEvent) -> dict:
-        """列出当前会话已订阅的 RSS 源，用于确认订阅索引、标题、URL、拉取间隔和最近状态。"""
+        """列出当前会话已订阅的 RSS 源。
+        """
         user = event.unified_msg_origin
         items = []
         for idx, url in enumerate(self.data_handler.get_subs_channel_url(user)):
@@ -1251,7 +1257,12 @@ class RssPlugin(Star):
 
     @filter.llm_tool(name="rss_remove_subscription")
     async def rss_remove_subscription(self, event: AstrMessageEvent, index: int = -1, feed_url: str = "") -> dict:
-        """删除当前会话的 RSS 订阅。可传 index（来自 rss_list_subscriptions）或完整 feed_url；参数不足时拒绝删除。"""
+        """删除当前会话的 RSS 订阅。
+
+        Args:
+            index(number): 可选。订阅索引，来自 rss_list_subscriptions 返回的 subscriptions[].index。默认 -1 表示不使用索引。
+            feed_url(string): 可选。完整 Feed URL；当用户直接给出要删除的订阅链接时使用。
+        """
         user = event.unified_msg_origin
         subs = self.data_handler.get_subs_channel_url(user)
         target_url = ""
@@ -1273,12 +1284,22 @@ class RssPlugin(Star):
         feed_url: str = "",
         index: int = -1,
         limit: int = 5,
-        only_new: bool = False,
+        only_new: bool = True,
         include_full_content: bool = True,
         return_full_content: bool = False,
         mark_as_seen: bool = False,
     ) -> dict:
-        """拉取 RSS/Atom/JSON Feed 条目并返回结构化内容给 LLM。return_full_content=true 时绕过字数截断返回本次拉取全文。"""
+        """拉取单个 RSS/Atom/JSON Feed 条目并返回结构化内容。
+
+        Args:
+            feed_url(string): 可选。直接拉取指定完整 Feed URL。与 index 二选一；优先级高于 index。
+            index(number): 可选。当前会话订阅列表中的索引，来自 rss_list_subscriptions；feed_url 为空时使用。
+            limit(number): 可选。最多返回条目数，默认 5，并受 hard_max_items_per_fetch 保护。
+            only_new(boolean): 可选。true 只返回相对当前订阅状态的新内容；false 返回最新内容。默认 true。
+            include_full_content(boolean): 可选。true 时优先返回正文 content；false 时偏向摘要/description。默认 true。
+            return_full_content(boolean): 可选。true 时全量返回本次拉取内容，绕过 max_item_chars 与 max_total_chars 截断。默认 false。
+            mark_as_seen(boolean): 可选。true 时把本次返回条目标记为已读，后续 only_new=true 将不再返回这些条目。默认 false。
+        """
         try:
             user = event.unified_msg_origin
             subs = self.data_handler.get_subs_channel_url(user)
@@ -1320,12 +1341,19 @@ class RssPlugin(Star):
     async def rss_poll_subscriptions(
         self,
         event: AstrMessageEvent,
-        only_new: bool = False,
+        only_new: bool = True,
         limit_per_feed: int = 5,
         return_full_content: bool = False,
         mark_as_seen: bool = False,
     ) -> dict:
-        """拉取当前会话所有订阅源的内容并直接返回给 LLM。return_full_content=true 时绕过字数截断返回本次拉取全文。"""
+        """拉取当前会话所有订阅源的内容并返回结构化结果。
+
+        Args:
+            only_new(boolean): 可选。true 只返回新增内容；false 返回最新内容。默认 true。
+            limit_per_feed(number): 可选。每个 Feed 最多返回条目数，默认 5，并受 hard_max_items_per_fetch 保护。
+            return_full_content(boolean): 可选。true 时全量返回本次拉取内容，绕过 max_item_chars 与 max_total_chars 截断。默认 false。
+            mark_as_seen(boolean): 可选。true 时把本次返回条目标记为已读。默认 false。
+        """
         user = event.unified_msg_origin
         results = []
         for url in self.data_handler.get_subs_channel_url(user):
@@ -1368,7 +1396,16 @@ class RssPlugin(Star):
         max_item_chars: int = 0,
         max_total_chars: int = 0,
     ) -> dict:
-        """更新 LLM 使用 RSS 所需的插件配置。"""
+        """更新 RSS 插件自身配置，并刷新 RSS 定时任务。
+
+        Args:
+            proxy_url(string): 可选。全局代理地址，例如 http://127.0.0.1:7890。非空时设置代理。
+            clear_proxy(boolean): 可选。true 时清空当前代理配置。默认 false。
+            default_interval_minutes(number): 可选。默认订阅拉取间隔分钟数；大于 0 时生效。
+            max_items_per_poll(number): 可选。自动拉取时每个订阅最多返回条目数；大于 0 时生效。
+            max_item_chars(number): 可选。单个 post 返回给 LLM 的最大字数；大于 0 时生效。
+            max_total_chars(number): 可选。单次返回给 LLM 的总字数上限；大于 0 时生效。
+        """
         updates = {}
         if clear_proxy:
             self.proxy_url = ""
