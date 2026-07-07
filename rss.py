@@ -18,6 +18,16 @@ def _format_cst(ts: int) -> str:
         return ""
 
 
+def _embed_media_into_body(body: str, media_urls: list[str]) -> str:
+    """将媒体引用（音频/视频）嵌入正文末尾。"""
+    if not media_urls:
+        return body
+    extras = [m for m in media_urls if m.strip()]
+    if extras:
+        body = body.rstrip() + "\n\n" + "\n".join(extras)
+    return body
+
+
 def _embed_images_into_body(
     body: str,
     pic_urls: list[str],
@@ -94,30 +104,34 @@ class RSSItem:
         include_full_content: bool = False,
         max_chars: int = 0,
     ) -> dict:
-        """转换为 LLM 友好的结构化字典。"""
+        """转换为 LLM 友好的结构化字典。
+
+        注意：channel_title 等 feed 级元数据由调用方在顶层提供，
+        item 层不重复携带以避免浪费 token。
+        """
         body = (
             self.content if include_full_content and self.content else self.description
         )
         if max_chars and max_chars > 0 and len(body) > max_chars:
-            body = body[:max_chars].rstrip() + "..."
+            body = body[:max_chars].rstrip() + "\n\n[...已截断]"
 
-        # 将图片转述嵌入正文
+        # 将图片转述嵌入正文；媒体引用也嵌入正文，不设独立字段
         body = _embed_images_into_body(body, self.pic_urls, self.image_captions)
+        body = _embed_media_into_body(body, self.media_urls)
 
-        return {
+        result: dict[str, object] = {
             "id": self.identity(),
-            "channel_title": self.chan_title,
             "title": self.title,
-            "url": self.link,
-            "author": self.author,
-            "published": self.pubDate,
-            "published_timestamp": self.pubDate_timestamp,
+            "link": self.link,
             "published_cst": _format_cst(self.pubDate_timestamp),
-            "summary": self.description,
             "content": body,
-            "tags": self.tags,
-            "media": self.media_urls,
         }
+        if self.author:
+            result["author"] = self.author
+        tags = [t for t in self.tags if t]
+        if tags:
+            result["tags"] = tags
+        return result
 
     def __str__(self):
         return f"{self.title} - {self.link} - {self.description} - {self.pubDate}"

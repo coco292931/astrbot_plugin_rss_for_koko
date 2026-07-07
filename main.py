@@ -1668,10 +1668,16 @@ class RssPlugin(Star):
             ):
                 self._mark_items_seen(url, user, rss_items)
                 self.data_handler.save_data()
+            feed_title = (
+                self.data_handler.data.get(url, {})
+                .get("info", {})
+                .get("title", rss_items[0].chan_title if rss_items else "未知频道")
+            )
             return {
                 "status": "success",
                 "message": f"获取到 {len(rss_items)} 条内容",
                 "data": {
+                    "title": feed_title,
                     "url": url,
                     "items": self._items_to_llm_payload(
                         rss_items,
