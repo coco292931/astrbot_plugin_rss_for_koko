@@ -99,6 +99,10 @@ class RssPlugin(Star):
             str(config.get("image_caption_prompt", "") or "").strip()
             or self.IMAGE_CAPTION_PROMPT
         )
+        self.image_caption_timeout_seconds = self._cfg_int(
+            "image_caption_timeout_seconds",
+            45,
+        )
         self.preserve_reasoning_in_history = bool(config.get("preserve_reasoning_in_history", True))
         self.send_user_fallback_on_llm_error = bool(config.get("send_user_fallback_on_llm_error", True))
 
@@ -839,24 +843,35 @@ class RssPlugin(Star):
         try:
             tool_image_caption = getattr(toolbox, "tool_image_caption", None)
             if callable(tool_image_caption):
-                result = await tool_image_caption(
-                    None,
-                    urls=urls,
-                    use_event_images=False,
-                    prompt=self.image_caption_prompt,
+                result = await asyncio.wait_for(
+                    tool_image_caption(
+                        None,
+                        urls=urls,
+                        use_event_images=False,
+                        prompt=self.image_caption_prompt,
+                    ),
+                    timeout=max(1, self.image_caption_timeout_seconds),
                 )
             else:
                 run_koko_tool = getattr(toolbox, "run_koko_tool", None)
                 if callable(run_koko_tool):
-                    result = await run_koko_tool(
-                        None,
-                        tool_name="tool_image_caption",
-                        args={
-                            "urls": urls,
-                            "use_event_images": False,
-                            "prompt": self.image_caption_prompt,
-                        },
+                    result = await asyncio.wait_for(
+                        run_koko_tool(
+                            None,
+                            tool_name="tool_image_caption",
+                            args={
+                                "urls": urls,
+                                "use_event_images": False,
+                                "prompt": self.image_caption_prompt,
+                            },
+                        ),
+                        timeout=max(1, self.image_caption_timeout_seconds),
                     )
+        except asyncio.TimeoutError:
+            self.logger.warning(
+                f"rss: 调用 toolbox image_caption 超时（{self.image_caption_timeout_seconds}s），跳过图片转述"
+            )
+            return []
         except Exception as e:
             self.logger.debug(f"rss: 调用 toolbox image_caption 失败: {e}")
             return []

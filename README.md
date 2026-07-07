@@ -226,6 +226,12 @@ pillow
 - 可用占位符：`{image_type}`、`{index}`、`{total}`、`{source}`。
 - 留空时传空值
 
+#### `image_caption_timeout_seconds`
+
+- 类型：`int`
+- 默认值：`45`
+- 说明：RSS 图片/GIF 调用 `tool_image_caption` 的超时时间。超过该秒数会跳过转述，仅保留图片链接，不写入占位符。
+
 #### `send_user_fallback_on_llm_error`
 
 - 类型：`bool`

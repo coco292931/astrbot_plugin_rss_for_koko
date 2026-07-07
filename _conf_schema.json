@@ -31,6 +31,17 @@
         "hint": "调用 astrbot_plugin_toolbox_for_koko 的 tool_image_caption 时使用。支持 {image_type}、{index}、{total}、{source} 占位符；留空使用内置默认提示词。",
         "default": "请用中文简洁转述这张 RSS 内容中的 {image_type}。只描述图片实际内容，不要输出图片占位符。"
     },
+    "image_caption_timeout_seconds": {
+        "description": "RSS 图片/GIF 转述超时时间（秒）",
+        "type": "int",
+        "hint": "调用 astrbot_plugin_toolbox_for_koko 的 tool_image_caption 超过该秒数未返回时跳过转述，仅保留图片链接。建议 10-120 秒。",
+        "default": 45,
+        "slider": {
+            "min": 0,
+            "max": 300,
+            "step": 1
+        }
+    },
     "preserve_reasoning_in_history": {
         "description": "落盘时保留 LLM 思考内容",
         "type": "bool",
@@ -48,20 +59,35 @@
         "type": "int",
         "hint": "新增订阅未指定间隔时使用；替代原版手动 cron 表达式。",
         "obvious_hint": true,
-        "default": 60
+        "default": 60,
+        "slider": {
+            "min": 0,
+            "max": 1440,
+            "step": 1
+        }
     },
     "max_items_per_poll": {
         "description": "单个订阅每次自动拉取的最大条目数",
         "type": "int",
         "hint": "-1 表示不限制，但仍受 hard_max_items_per_fetch 保护。",
         "obvious_hint": true,
-        "default": 5
+        "default": 5,
+        "slider": {
+            "min": -1,
+            "max": 50,
+            "step": 1
+        }
     },
     "hard_max_items_per_fetch": {
         "description": "单次抓取硬上限",
         "type": "int",
         "hint": "防止 LLM 工具或异常 Feed 一次返回过多内容。",
-        "default": 50
+        "default": 50,
+        "slider": {
+            "min": 0,
+            "max": 100,
+            "step": 1
+        }
     },
     "max_item_chars": {
         "description": "单个 post 返回给 LLM 的最大字数",
