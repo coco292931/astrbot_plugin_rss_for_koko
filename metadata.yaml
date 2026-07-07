@@ -1,6 +1,6 @@
 name: astrbot_plugin_rss_for_koko
 desc: 面向 LLM 的 RSS/Atom/JSON Feed 订阅插件，支持工具调用、结构化拉取、去重与主动 LLM 推送。
 help: https://github.com/coco292931/astrbot_plugin_rss
-version: v1.2.0 # 插件版本号。格式：v1.1.1 或者 v1.1
+version: v1.3.0 
 author: Soulter / coco # 作者
 repo: https://github.com/coco292931/astrbot_plugin_rss # 插件的仓库地址

@@ -70,7 +70,7 @@ PLUGIN_NAME = "astrbot_plugin_rss_for_koko"
     "astrbot_plugin_rss_for_koko",
     "Soulter / coco",
     "面向 LLM 的 RSS 订阅插件",
-    "1.2.0",
+    "1.3.0",
     "https://github.com/coco292931/astrbot_plugin_rss",
 )
 class RssPlugin(Star):
