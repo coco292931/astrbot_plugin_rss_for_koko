@@ -1235,6 +1235,8 @@ class RssPlugin(Star):
             feed_url(string): 必填。完整 Feed URL，必须以 http:// 或 https:// 开头。例如 https://www.ruanyifeng.com/blog/atom.xml。
             interval_minutes(number): 可选。自动拉取间隔分钟数；传 0 或不传时使用插件配置 default_interval_minutes。
         """
+        if not feed_url or not feed_url.strip():
+            return "缺少必填参数 feed_url：完整 Feed URL，必须以 http:// 或 https:// 开头。例如 https://www.ruanyifeng.com/blog/atom.xml。"
         try:
             info = await self._add_url(
                 feed_url,
@@ -1268,13 +1270,15 @@ class RssPlugin(Star):
         """
         user = event.unified_msg_origin
         subs = self.data_handler.get_subs_channel_url(user)
+        if not feed_url and index == -1:
+            return "缺少参数：请提供 index（订阅索引，来自 rss_list_subscriptions 的 subscriptions[].index）或 feed_url（完整 Feed URL）之一。"
         target_url = ""
         if feed_url:
             target_url = self._normalize_url(feed_url)
         elif 0 <= index < len(subs):
             target_url = subs[index]
         else:
-            return {"status": "error", "message": "请提供有效 index 或 feed_url"}
+            return {"status": "error", "message": f"index {index} 超出订阅列表范围（共 {len(subs)} 个订阅），请先调用 rss_list_subscriptions 确认索引。"}
         self.data_handler.data.get(target_url, {}).get("subscribers", {}).pop(user, None)
         self.data_handler.save_data()
         self._fresh_asyncIOScheduler()
@@ -1303,12 +1307,14 @@ class RssPlugin(Star):
             return_full_content(boolean): 可选。true 时全量返回本次拉取内容，绕过 max_item_chars 与 max_total_chars 截断。默认 false。
             mark_as_seen(boolean): 可选。true 时把本次返回条目标记为已读，后续 only_new=true 将不再返回这些条目。默认 false。
         """
+        if not feed_url and index == -1:
+            return "缺少参数：请提供 feed_url（完整 Feed URL）或 index（订阅索引，来自 rss_list_subscriptions 的 subscriptions[].index）之一。"
         try:
             user = event.unified_msg_origin
             subs = self.data_handler.get_subs_channel_url(user)
             url = self._normalize_url(feed_url) if feed_url else (subs[index] if 0 <= index < len(subs) else "")
             if not url:
-                return {"status": "error", "message": "请提供 feed_url 或有效订阅 index"}
+                return {"status": "error", "message": f"index {index} 超出订阅列表范围（共 {len(subs)} 个订阅），请先调用 rss_list_subscriptions 确认索引。"}
             sub = self.data_handler.data.get(url, {}).get("subscribers", {}).get(user, {})
             rss_items = await self.poll_rss(
                 url,
