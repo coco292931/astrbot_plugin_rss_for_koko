@@ -36,9 +36,9 @@ def _embed_images_into_body(
     """将图片转述嵌入正文对应位置。
 
     策略：
-    1. 对 pic_urls 中每张图，在 body 内查找其 URL 并用转述标记替换。
-    2. 如果 body 中找不到对应 URL，则在末尾附加该图片的转述。
-    3. 转述失败时回退到 URL（LLM 可自行尝试读取）。
+    1. 每张图先尝试在 body 中查找其 URL，找到则用 ``[图片转述: caption]`` 替换。
+    2. 未嵌入正文的图片，在末尾以有序列表 ``n. [图片转述: caption]`` 追加。
+    3. 转述失败的图片回退为 ``[图片: url]``。
     """
     caption_map: dict[str, str] = {}
     for cap in image_captions:
@@ -59,16 +59,16 @@ def _embed_images_into_body(
             body = body.replace(url, marker)
             replaced.add(url)
 
-    # 未嵌入正文的图片追加到末尾
+    # 未嵌入正文的图片追加到末尾，带序号方便 LLM 定位
     remaining = [url for url in pic_urls if url and url not in replaced]
     if remaining:
         extras = []
-        for url in remaining:
+        for idx, url in enumerate(remaining, 1):
             caption = caption_map.get(url, "")
             if caption:
-                extras.append(f"[图片转述: {caption}]")
+                extras.append(f"{idx}. [图片转述: {caption}]")
             else:
-                extras.append(f"[图片: {url}]")
+                extras.append(f"{idx}. [图片: {url}]")
         body = body.rstrip() + "\n\n" + "\n".join(extras)
 
     return body

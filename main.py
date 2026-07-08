@@ -1030,13 +1030,22 @@ class RssPlugin(Star):
         return None
 
     async def _ensure_item_image_captions(self, items: list[RSSItem]) -> None:
-        """遇到图片/GIF 时调用 toolbox 的 image_caption 转述，并保留图片链接。"""
+        """遇到图片/GIF 时调用 toolbox 的 image_caption 转述，并保留图片链接。
+
+        部分图片转述失败时，不覆盖已有成功的 caption，
+        失败图片留空让 _embed_images_into_body 走 URL 回退。
+        """
         for item in items:
             if not item.pic_urls or item.image_captions:
                 continue
             captions = await self._caption_image_urls(item.pic_urls)
-            if captions:
-                item.image_captions = captions
+            if not captions:
+                continue
+            # 合并：已存在的 caption 优先，新来的补充
+            existing = {c["url"] for c in item.image_captions}
+            for c in captions:
+                if c["url"] not in existing:
+                    item.image_captions.append(c)
 
     async def _caption_image_urls(self, image_urls: list[str]) -> list[dict[str, str]]:
         """跨插件调用 toolbox tool_image_caption，返回 url + caption 映射。"""
@@ -1104,50 +1113,43 @@ class RssPlugin(Star):
     ) -> list[dict[str, str]]:
         """解析 toolbox 转述结果，返回 url + caption 映射。
 
-        支持两种格式：
-        1. 多行格式：每行 "n. [XXX: content]"，XXX 为 图片/GIF 等类型标签。
-        2. 单段纯文本：整段作为唯一图片的转述。
-
-        转述失败的图片不加入返回列表（后续回退到 URL 本身或 alt 标签）。
+        格式特征：
+        - 多图：以换行分隔，每行为 ``n. [XXX: content]`` 或 ``n.[XXX: content]``，
+          XXX 为 图片/GIF 等类型标签。content 中可含嵌套的 ``[]``，
+          用 ``n. [...]`` 前缀标识每条图的起始。
+        - 单图：无序号前缀，整段纯文本 caption。
+        - 转述失败的图片不加入返回列表。
         """
         raw = str(message or "").strip()
         if not raw:
             return []
 
-        # 按行分割并尝试匹配 "n. [XXX: " 前缀模式
-        lines = [line.strip() for line in raw.splitlines() if line.strip()]
-        matched_lines: list[int] = []
-        for i, line in enumerate(lines):
-            # 匹配 "n. [XXX: content]" 或 "n.[XXX: content]"
-            stripped = re.sub(r"^\d+\s*[\.、]\s*", "", line)
-            if re.match(r"^\[[^\]]+[:：]\s*", stripped):
-                matched_lines.append(i)
+        # 尝试按多图格式分割：以换行符 + "n. " 为分隔
+        # 匹配形如 "1. [图片:"、"2.[GIF:" 等
+        segments: list[str] = re.split(
+            r"(?:^|\n)\s*\d+\s*[\.、]\s*(?=\[[^\]]+[:：])",
+            raw,
+        )
+        segments = [s.strip() for s in segments if s.strip()]
 
-        if matched_lines:
-            # 多图模式：按行号索引
-            caption_map: dict[int, str] = {}
-            for i, line in enumerate(lines):
-                stripped = re.sub(r"^\d+\s*[\.、]\s*", "", line)
-                m = re.match(r"^\[[^\]:：]+[:：]\s*(.*?)\]$", stripped, re.S)
-                if m:
-                    caption_map[i] = m.group(1).strip()
-                else:
-                    # 行有数字前缀但不是标准格式，尝试直接去除数字前缀
-                    cleaned = re.sub(r"^\d+\s*[\.、]\s*", "", stripped)
-                    if cleaned and not re.match(r"^\[.*?\]$", cleaned):
-                        caption_map[i] = cleaned
+        if len(segments) > 1:
+            # 多图模式：segments 数量应匹配或接近图片数
             captions = []
-            for idx, url in enumerate(image_urls):
-                line = caption_map.get(idx, "")
-                if line:
-                    captions.append({"url": url, "caption": line})
+            for idx, seg in enumerate(segments):
+                if idx >= len(image_urls):
+                    break
+                # 去掉最外层 [XXX: content] 的包裹
+                m = re.match(r"^\[[^\]:]+[:：]\s*(.*)\]$", seg, re.S)
+                text = m.group(1).strip() if m else seg
+                captions.append({"url": image_urls[idx], "caption": text})
             return captions
 
-        # 单图模式：整段消息是唯一图片的转述
+        # 单图模式：整段是唯一图片的 caption
         if len(image_urls) == 1:
             return [{"url": image_urls[0], "caption": raw}]
 
-        # 行数匹配图片数：逐行对应
+        # 行数对齐模式：按换行切分，逐行对应图片
+        lines = [line.strip() for line in raw.splitlines() if line.strip()]
         if len(lines) >= len(image_urls):
             captions = []
             for idx, url in enumerate(image_urls):
@@ -1156,7 +1158,6 @@ class RssPlugin(Star):
                     captions.append({"url": url, "caption": text})
             return captions
 
-        # 无法解析：返回空，后续回退到 URL
         return []
 
     async def _send_items_plain(self, session_id: str, items: list[RSSItem]) -> bool:
@@ -1235,6 +1236,9 @@ class RssPlugin(Star):
         self, session_id: str, chain: MessageChain
     ) -> None:
         """尽量补写平台消息流水，方便后续主动上下文读取。"""
+        # 实测不需要
+        return
+
         if message_chain_to_storage_message_parts is None:
             return
         parsed = self._parse_session_id(session_id)
